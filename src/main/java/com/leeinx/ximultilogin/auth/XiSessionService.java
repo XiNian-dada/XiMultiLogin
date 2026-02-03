@@ -133,6 +133,28 @@ public class XiSessionService {
     }
 
     /**
+     * 验证玩家是否已加入服务器（重载方法，接受GameProfile参数）
+     * 
+     * @param profile    GameProfile对象
+     * @param serverId   服务器唯一标识符
+     * @param ipAddress  IP地址（可为null）
+     * @return 验证成功返回 GameProfile，验证失败返回 null
+     */
+    public Object hasJoinedServer(Object profile, String serverId, java.net.InetAddress ipAddress) {
+        try {
+            // 从GameProfile中获取用户名
+            String username = getProfileNameWithReflection(profile);
+            LOGGER.info("XiSessionService: Authenticating player " + username + " (with GameProfile) with serverId " + serverId);
+            
+            // 调用原始的验证方法
+            return hasJoinedServer(username, serverId, ipAddress);
+        } catch (Exception e) {
+            LOGGER.warning("XiSessionService: Exception in hasJoinedServer(GameProfile): " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 使用反射验证身份
      * 
      * @param profile  GameProfile 对象

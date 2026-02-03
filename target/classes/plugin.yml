@@ -1,6 +1,0 @@
-name: XiMultiLogin
-main: com.leeinx.ximultilogin.XiMultiLogin
-version: 1.0
-authors: [Leeinx Team]
-description: A Minecraft plugin that supports multiple authentication methods
-api-version: 1.16

@@ -1,0 +1,21 @@
+# XiMultiLogin 配置文件
+# 验证链顺序：从上到下尝试
+pipeline:
+  - type: MOJANG
+    enabled: true
+  - type: YGGDRASIL
+    name: "LittleSkin"
+    api: "https://littleskin.cn/api/yggdrasil"
+    enabled: true
+
+# 数据库配置
+database:
+  # 数据库类型: SQLite (默认) 或 MySQL
+  type: "SQLite"
+  # MySQL 配置 (仅当 type 为 MySQL 时生效)
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "ximultilogin"
+    username: "root"
+    password: "password"

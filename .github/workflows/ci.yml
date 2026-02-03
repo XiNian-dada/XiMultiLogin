@@ -6,9 +6,55 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force create tag even if it exists'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    
+    - name: Extract version from pom.xml
+      id: extract-version
+      run: |
+        VERSION=$(grep -E '<version>[0-9]+(\.[0-9]+)*</version>' pom.xml | head -1 | sed 's/<version>//;s/<\/version>//;s/^[[:space:]]*//;s/[[:space:]]*$//')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Check if tag exists
+      id: check-tag
+      run: |
+        if git tag -l "${{ steps.extract-version.outputs.tag }}" | grep -q "${{ steps.extract-version.outputs.tag }}"; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create tag
+      if: steps.check-tag.outputs.exists == 'false' || github.event.inputs.force == 'true'
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git tag -a "${{ steps.extract-version.outputs.tag }}" -m "Release version ${{ steps.extract-version.outputs.version }}"
+        git push origin "${{ steps.extract-version.outputs.tag }}"
+    
+    - name: Skip tag creation
+      if: steps.check-tag.outputs.exists == 'true' && github.event.inputs.force != 'true'
+      run: |
+        echo "Tag ${{ steps.extract-version.outputs.tag }} already exists. Skipping tag creation."
+
   build:
+    needs: create-tag
     runs-on: ubuntu-latest
     
     steps:

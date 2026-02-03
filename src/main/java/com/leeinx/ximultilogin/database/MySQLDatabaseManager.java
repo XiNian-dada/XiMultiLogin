@@ -152,19 +152,37 @@ public class MySQLDatabaseManager implements DatabaseManager {
     }
 
     @Override
-    public boolean storeIdentity(String name, UUID uuid) {
+    public boolean storeIdentity(String name, UUID uuid, String authProvider) {
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                "INSERT INTO " + TABLE_NAME + " (name, uuid, created_at) VALUES (?, ?, ?)")) {
+                "INSERT INTO " + TABLE_NAME + " (name, uuid, auth_provider, created_at) VALUES (?, ?, ?, ?)")) {
             stmt.setString(1, name);
             stmt.setString(2, uuid.toString());
-            stmt.setTimestamp(3, new Timestamp(System.currentTimeMillis()));
+            stmt.setString(3, authProvider);
+            stmt.setTimestamp(4, new Timestamp(System.currentTimeMillis()));
             int affectedRows = stmt.executeUpdate();
             return affectedRows > 0;
         } catch (SQLException e) {
             LOGGER.warning("MySQLDatabaseManager: Error storing identity: " + e.getMessage());
             return false;
         }
+    }
+
+    @Override
+    public String getAuthProvider(String name) {
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                "SELECT auth_provider FROM " + TABLE_NAME + " WHERE name = ?")) {
+            stmt.setString(1, name);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("auth_provider");
+                }
+            }
+        } catch (SQLException e) {
+            LOGGER.warning("MySQLDatabaseManager: Error getting auth provider: " + e.getMessage());
+        }
+        return null;
     }
 
     @Override
@@ -226,6 +244,7 @@ public class MySQLDatabaseManager implements DatabaseManager {
                     "id INT PRIMARY KEY AUTO_INCREMENT, " +
                     "name VARCHAR(16) UNIQUE NOT NULL, " +
                     "uuid VARCHAR(36) NOT NULL, " +
+                    "auth_provider VARCHAR(50) NOT NULL, " +
                     "created_at TIMESTAMP NOT NULL, " +
                     "updated_at TIMESTAMP, " +
                     "INDEX idx_name (name) " +

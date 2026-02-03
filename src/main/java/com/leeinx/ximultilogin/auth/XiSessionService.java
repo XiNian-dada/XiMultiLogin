@@ -114,7 +114,7 @@ public class XiSessionService implements MinecraftSessionService {
                 GameProfile profile = provider.authenticate(username, serverId);
                 if (profile != null) {
                     // 验证身份锁定
-                    boolean identityVerified = identityGuard.verifyIdentity(profile.getName(), profile.getId());
+                    boolean identityVerified = identityGuard.verifyIdentity(profile.getName(), profile.getId(), provider.getName());
                     if (identityVerified) {
                         LOGGER.info("XiSessionService: Authentication successful with " + provider.getName() + " for " + username);
                         return profile;

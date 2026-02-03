@@ -37,13 +37,22 @@ public interface DatabaseManager {
     UUID getUUID(String name);
 
     /**
-     * 存储名称和 UUID 的映射
+     * 存储身份映射
      *
      * @param name 玩家名称
      * @param uuid 玩家 UUID
-     * @return 存储是否成功
+     * @param authProvider 认证提供者名称
+     * @return 是否存储成功
      */
-    boolean storeIdentity(String name, UUID uuid);
+    boolean storeIdentity(String name, UUID uuid, String authProvider);
+
+    /**
+     * 获取玩家的认证提供者
+     *
+     * @param name 玩家名称
+     * @return 认证提供者名称，若不存在返回 null
+     */
+    String getAuthProvider(String name);
 
     /**
      * 更新名称对应的 UUID

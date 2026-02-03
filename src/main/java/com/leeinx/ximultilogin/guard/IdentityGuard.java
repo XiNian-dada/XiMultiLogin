@@ -81,11 +81,12 @@ public class IdentityGuard {
      *
      * @param name         玩家名称
      * @param incomingUuid 传入的 UUID
+     * @param authProvider 认证提供者名称
      * @return 验证是否通过
      */
-    public boolean verifyIdentity(String name, UUID incomingUuid) {
-        if (name == null || incomingUuid == null) {
-            LOGGER.warning("IdentityGuard: Name or UUID is null");
+    public boolean verifyIdentity(String name, UUID incomingUuid, String authProvider) {
+        if (name == null || incomingUuid == null || authProvider == null) {
+            LOGGER.warning("IdentityGuard: Name, UUID, or authProvider is null");
             return false;
         }
 
@@ -93,25 +94,35 @@ public class IdentityGuard {
 
         if (storedUuid == null) {
             // 第一次登录，记录身份
-            boolean stored = databaseManager.storeIdentity(name, incomingUuid);
+            boolean stored = databaseManager.storeIdentity(name, incomingUuid, authProvider);
             if (stored) {
-                LOGGER.info("IdentityGuard: New identity registered: " + name + " -> " + incomingUuid);
+                LOGGER.info("IdentityGuard: New identity registered: " + name + " -> " + incomingUuid + " (" + authProvider + ")");
                 return true;
             } else {
-                LOGGER.warning("IdentityGuard: Failed to store new identity: " + name + " -> " + incomingUuid);
+                LOGGER.warning("IdentityGuard: Failed to store new identity: " + name + " -> " + incomingUuid + " (" + authProvider + ")");
                 return false;
             }
         } else {
             // 已存在身份，验证是否匹配
             boolean matches = storedUuid.equals(incomingUuid);
             if (matches) {
-                LOGGER.info("IdentityGuard: Identity verified: " + name + " -> " + incomingUuid);
+                LOGGER.info("IdentityGuard: Identity verified: " + name + " -> " + incomingUuid + " (" + databaseManager.getAuthProvider(name) + ")");
                 return true;
             } else {
-                LOGGER.warning("IdentityGuard: Identity mismatch for " + name + ": stored=" + storedUuid + ", incoming=" + incomingUuid);
+                LOGGER.warning("IdentityGuard: Identity mismatch for " + name + ": stored=" + storedUuid + ", incoming=" + incomingUuid + " (" + authProvider + ")");
                 return false;
             }
         }
+    }
+
+    /**
+     * 获取玩家的认证提供者
+     *
+     * @param name 玩家名称
+     * @return 认证提供者名称，若不存在返回 null
+     */
+    public String getAuthProvider(String name) {
+        return databaseManager.getAuthProvider(name);
     }
 
     /**

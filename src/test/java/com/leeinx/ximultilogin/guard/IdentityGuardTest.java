@@ -1,6 +1,6 @@
-package com.leeinx.ximultilogin.guard;
+package com.Leeinx.ximultilogin.guard;
 
-import com.leeinx.ximultilogin.database.SQLiteDatabaseManager;
+import com.Leeinx.ximultilogin.database.SQLiteDatabaseManager;
 import org.junit.Test;
 
 import java.io.File;

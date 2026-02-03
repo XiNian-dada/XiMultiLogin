@@ -1,4 +1,4 @@
-package com.leeinx.ximultilogin.reflection;
+package com.Leeinx.ximultilogin.reflection;
 
 import org.junit.Test;
 

@@ -1,4 +1,4 @@
-package com.leeinx.ximultilogin.config;
+package com.Leeinx.ximultilogin.config;
 
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
@@ -8,195 +8,171 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 
 /**
- * 配置管理类
- * 加载和解析 YAML 配置文件，提供验证链配置
+ * 配置管理器
+ * 负责加载和管理插件配置
  */
 public class ConfigManager {
 
     private static final Logger LOGGER = Bukkit.getLogger();
     private final JavaPlugin plugin;
-    private FileConfiguration config;
     private File configFile;
+    private FileConfiguration config;
 
     /**
-     * 构造配置管理器
-     *
+     * 构造 ConfigManager
+     * 
      * @param plugin 插件实例
      */
     public ConfigManager(JavaPlugin plugin) {
         this.plugin = plugin;
-        reloadConfig();
+        loadConfig();
     }
 
     /**
-     * 重载配置文件
+     * 加载配置
      */
-    public void reloadConfig() {
-        if (configFile == null) {
-            configFile = new File(plugin.getDataFolder(), "config.yml");
-        }
-
-        // 如果配置文件不存在，从资源文件复制
+    public void loadConfig() {
+        configFile = new File(plugin.getDataFolder(), "config.yml");
         if (!configFile.exists()) {
             plugin.saveResource("config.yml", false);
-            LOGGER.info("ConfigManager: Created default config.yml");
+            LOGGER.info("XiMultiLogin: Created default config.yml");
         }
-
-        // 加载配置文件
         config = YamlConfiguration.loadConfiguration(configFile);
-
-        // 加载默认配置作为 fallback
-        try (InputStream inputStream = plugin.getResource("config.yml")) {
-            if (inputStream != null) {
-                YamlConfiguration defaultConfig = YamlConfiguration.loadConfiguration(new InputStreamReader(inputStream));
-                config.setDefaults(defaultConfig);
-            }
-        } catch (IOException e) {
-            LOGGER.warning("ConfigManager: Exception loading default config: " + e.getMessage());
-        }
-
-        LOGGER.info("ConfigManager: Config reloaded successfully");
+        LOGGER.info("XiMultiLogin: Config loaded successfully");
     }
 
     /**
-     * 获取配置文件
-     *
-     * @return 配置文件
+     * 保存配置
+     */
+    public void saveConfig() {
+        try {
+            config.save(configFile);
+            LOGGER.info("XiMultiLogin: Config saved successfully");
+        } catch (IOException e) {
+            LOGGER.severe("XiMultiLogin: Failed to save config: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取配置
+     * 
+     * @return 配置对象
      */
     public FileConfiguration getConfig() {
-        if (config == null) {
-            reloadConfig();
-        }
         return config;
     }
 
     /**
-     * 保存配置文件
-     */
-    public void saveConfig() {
-        if (config == null || configFile == null) {
-            return;
-        }
-
-        try {
-            getConfig().save(configFile);
-            LOGGER.info("ConfigManager: Config saved successfully");
-        } catch (IOException e) {
-            LOGGER.severe("ConfigManager: Exception saving config: " + e.getMessage());
-        }
-    }
-
-    /**
      * 获取验证链配置
-     *
-     * @return 验证链配置列表
+     * 
+     * @return 验证提供者配置列表
      */
     public List<ProviderConfig> getPipelineConfig() {
-        List<ProviderConfig> pipeline = new ArrayList<>();
+        List<ProviderConfig> providers = new ArrayList<>();
         ConfigurationSection pipelineSection = config.getConfigurationSection("pipeline");
-
-        if (pipelineSection == null) {
-            LOGGER.warning("ConfigManager: Pipeline section not found in config");
-            return pipeline;
-        }
-
-        // 遍历配置中的验证提供者
-        for (String key : pipelineSection.getKeys(false)) {
-            ConfigurationSection providerSection = pipelineSection.getConfigurationSection(key);
-            if (providerSection == null) {
-                continue;
-            }
-
-            try {
-                String type = providerSection.getString("type");
-                boolean enabled = providerSection.getBoolean("enabled", true);
-
-                if (type == null) {
-                    LOGGER.warning("ConfigManager: Provider type not specified for " + key);
-                    continue;
-                }
-
-                ProviderConfig providerConfig = new ProviderConfig();
-                providerConfig.setType(type);
-                providerConfig.setEnabled(enabled);
-
-                // 根据类型设置额外参数
-                if (type.equalsIgnoreCase("YGGDRASIL")) {
-                    String name = providerSection.getString("name", "Yggdrasil");
-                    String api = providerSection.getString("api");
-                    if (api == null) {
-                        LOGGER.warning("ConfigManager: API URL not specified for Yggdrasil provider " + name);
-                        continue;
+        if (pipelineSection != null) {
+            for (String key : pipelineSection.getKeys(false)) {
+                ConfigurationSection providerSection = pipelineSection.getConfigurationSection(key);
+                if (providerSection != null) {
+                    ProviderConfig providerConfig = new ProviderConfig();
+                    providerConfig.setType(providerSection.getString("type", "MOJANG"));
+                    providerConfig.setEnabled(providerSection.getBoolean("enabled", true));
+                    if ("YGGDRASIL".equalsIgnoreCase(providerConfig.getType())) {
+                        providerConfig.setName(providerSection.getString("name", "Yggdrasil"));
+                        providerConfig.setApiUrl(providerSection.getString("api", "https://authserver.mojang.com"));
+                    } else {
+                        providerConfig.setName(providerSection.getString("name", "Mojang"));
                     }
-                    providerConfig.setName(name);
-                    providerConfig.setApiUrl(api);
+                    providers.add(providerConfig);
                 }
-
-                pipeline.add(providerConfig);
-                LOGGER.info("ConfigManager: Loaded provider config: " + providerConfig.getType() + " (" + providerConfig.getName() + ") enabled: " + providerConfig.isEnabled());
-            } catch (Exception e) {
-                LOGGER.warning("ConfigManager: Exception loading provider config " + key + ": " + e.getMessage());
             }
+        } else {
+            // 添加默认配置
+            ProviderConfig mojangConfig = new ProviderConfig();
+            mojangConfig.setType("MOJANG");
+            mojangConfig.setEnabled(true);
+            mojangConfig.setName("Mojang");
+            providers.add(mojangConfig);
+            LOGGER.info("XiMultiLogin: Using default pipeline config");
         }
-
-        return pipeline;
+        return providers;
     }
 
     /**
      * 获取数据库配置
-     *
+     * 
      * @return 数据库配置
      */
     public DatabaseConfig getDatabaseConfig() {
-        DatabaseConfig dbConfig = new DatabaseConfig();
+        DatabaseConfig databaseConfig = new DatabaseConfig();
         ConfigurationSection databaseSection = config.getConfigurationSection("database");
-
-        if (databaseSection == null) {
-            LOGGER.warning("ConfigManager: Database section not found in config, using default SQLite");
-            dbConfig.setType("SQLite");
-            return dbConfig;
-        }
-
-        try {
-            String type = databaseSection.getString("type", "SQLite");
-            dbConfig.setType(type);
-
-            // 加载 MySQL 配置
-            if (type.equalsIgnoreCase("MySQL")) {
-                ConfigurationSection mysqlSection = databaseSection.getConfigurationSection("mysql");
-                if (mysqlSection != null) {
-                    String host = mysqlSection.getString("host", "localhost");
-                    int port = mysqlSection.getInt("port", 3306);
-                    String database = mysqlSection.getString("database", "ximultilogin");
-                    String username = mysqlSection.getString("username", "root");
-                    String password = mysqlSection.getString("password", "");
-
-                    dbConfig.setHost(host);
-                    dbConfig.setPort(port);
-                    dbConfig.setDatabase(database);
-                    dbConfig.setUsername(username);
-                    dbConfig.setPassword(password);
-                }
+        if (databaseSection != null) {
+            databaseConfig.setType(databaseSection.getString("type", "SQLite"));
+            ConfigurationSection mysqlSection = databaseSection.getConfigurationSection("mysql");
+            if (mysqlSection != null) {
+                databaseConfig.setHost(mysqlSection.getString("host", "localhost"));
+                databaseConfig.setPort(mysqlSection.getInt("port", 3306));
+                databaseConfig.setDatabase(mysqlSection.getString("database", "ximultilogin"));
+                databaseConfig.setUsername(mysqlSection.getString("username", "root"));
+                databaseConfig.setPassword(mysqlSection.getString("password", ""));
             }
+        } else {
+            // 默认使用 SQLite
+            databaseConfig.setType("SQLite");
+            LOGGER.info("XiMultiLogin: Using default database config");
+        }
+        return databaseConfig;
+    }
 
-            LOGGER.info("ConfigManager: Loaded database config: " + dbConfig.getType());
-        } catch (Exception e) {
-            LOGGER.warning("ConfigManager: Exception loading database config: " + e.getMessage());
+    /**
+     * 提供者配置类
+     */
+    public static class ProviderConfig {
+        private String type;
+        private boolean enabled;
+        private String name;
+        private String apiUrl;
+
+        public String getType() {
+            return type;
         }
 
-        return dbConfig;
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getApiUrl() {
+            return apiUrl;
+        }
+
+        public void setApiUrl(String apiUrl) {
+            this.apiUrl = apiUrl;
+        }
     }
 
     /**
      * 数据库配置类
-     * 存储数据库相关的配置信息
      */
     public static class DatabaseConfig {
         private String type;
@@ -252,49 +228,6 @@ public class ConfigManager {
 
         public void setPassword(String password) {
             this.password = password;
-        }
-    }
-
-    /**
-     * 验证提供者配置类
-     * 存储单个验证提供者的配置信息
-     */
-    public static class ProviderConfig {
-        private String type;
-        private String name;
-        private String apiUrl;
-        private boolean enabled;
-
-        public String getType() {
-            return type;
-        }
-
-        public void setType(String type) {
-            this.type = type;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getApiUrl() {
-            return apiUrl;
-        }
-
-        public void setApiUrl(String apiUrl) {
-            this.apiUrl = apiUrl;
-        }
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
         }
     }
 }

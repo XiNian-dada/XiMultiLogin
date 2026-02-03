@@ -1,33 +1,30 @@
-package com.leeinx.ximultilogin.auth;
-
-import com.mojang.authlib.GameProfile;
+package com.Leeinx.ximultilogin.auth;
 
 /**
- * 验证提供者接口
- * 定义统一的身份验证方法，所有验证提供者都需要实现此接口
+ * 认证提供者接口
+ * 定义认证提供者的通用方法
  */
 public interface AuthProvider {
 
     /**
-     * 验证玩家身份
-     *
-     * @param name     玩家名称
+     * 执行认证
+     * 
+     * @param username 玩家名称
      * @param serverId 服务器唯一标识符
-     * @return 验证成功返回 GameProfile，验证失败返回 null
+     * @return 认证成功返回游戏档案对象，认证失败返回 null
      */
-    GameProfile authenticate(String name, String serverId);
+    Object authenticate(String username, String serverId);
 
     /**
-     * 获取验证提供者的名称
-     * 用于日志输出和调试
-     *
-     * @return 验证提供者名称
+     * 获取提供者名称
+     * 
+     * @return 提供者名称
      */
     String getName();
 
     /**
-     * 检查验证提供者是否启用
-     *
+     * 检查提供者是否启用
+     * 
      * @return 是否启用
      */
     boolean isEnabled();

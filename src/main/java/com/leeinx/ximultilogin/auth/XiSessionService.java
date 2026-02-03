@@ -1,38 +1,34 @@
-package com.leeinx.ximultilogin.auth;
+package com.Leeinx.ximultilogin.auth;
 
-import com.leeinx.ximultilogin.auth.providers.MojangAuthProvider;
-import com.leeinx.ximultilogin.auth.providers.YggdrasilAuthProvider;
-import com.leeinx.ximultilogin.config.ConfigManager;
-import com.leeinx.ximultilogin.guard.IdentityGuard;
-import com.mojang.authlib.GameProfile;
-import com.mojang.authlib.exceptions.AuthenticationUnavailableException;
-import com.mojang.authlib.minecraft.MinecraftSessionService;
+import com.Leeinx.ximultilogin.auth.providers.MojangAuthProvider;
+import com.Leeinx.ximultilogin.auth.providers.YggdrasilAuthProvider;
+import com.Leeinx.ximultilogin.config.ConfigManager;
+import com.Leeinx.ximultilogin.guard.IdentityGuard;
 import org.bukkit.Bukkit;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.logging.Logger;
 
 /**
  * 验证链管理器
- * 实现 MinecraftSessionService 接口，根据配置的验证链顺序依次尝试验证
+ * 根据配置的验证链顺序依次尝试验证
  */
-public class XiSessionService implements MinecraftSessionService {
+public class XiSessionService {
 
     private static final Logger LOGGER = Bukkit.getLogger();
     private final List<AuthProvider> providers;
-    private final MinecraftSessionService originalSessionService;
+    private final Object originalSessionService;
     private final IdentityGuard identityGuard;
 
     /**
      * 构造 XiSessionService
-     *
+     * 
      * @param originalSessionService 原始的 SessionService 实例
      * @param configManager          配置管理器
      * @param identityGuard          身份守护者
      */
-    public XiSessionService(MinecraftSessionService originalSessionService, ConfigManager configManager, IdentityGuard identityGuard) {
+    public XiSessionService(Object originalSessionService, ConfigManager configManager, IdentityGuard identityGuard) {
         this.originalSessionService = originalSessionService;
         this.identityGuard = identityGuard;
         this.providers = new ArrayList<>();
@@ -41,7 +37,7 @@ public class XiSessionService implements MinecraftSessionService {
 
     /**
      * 初始化验证提供者列表
-     *
+     * 
      * @param configManager 配置管理器
      */
     private void initializeProviders(ConfigManager configManager) {
@@ -64,7 +60,7 @@ public class XiSessionService implements MinecraftSessionService {
 
     /**
      * 根据配置创建验证提供者
-     *
+     * 
      * @param providerConfig 提供者配置
      * @return 创建的验证提供者
      */
@@ -89,15 +85,13 @@ public class XiSessionService implements MinecraftSessionService {
     /**
      * 验证玩家是否已加入服务器
      * 这是核心验证方法，会按顺序尝试所有验证提供者
-     *
+     * 
      * @param username   玩家名称
      * @param serverId   服务器唯一标识符
      * @param ipAddress  IP地址（可为null）
      * @return 验证成功返回 GameProfile，验证失败返回 null
-     * @throws AuthenticationUnavailableException 当所有验证提供者都不可用时
      */
-    @Override
-    public GameProfile hasJoinedServer(String username, String serverId, java.net.InetAddress ipAddress) throws AuthenticationUnavailableException {
+    public Object hasJoinedServer(String username, String serverId, java.net.InetAddress ipAddress) {
         LOGGER.info("XiSessionService: Authenticating player " + username + " with serverId " + serverId);
 
         if (providers.isEmpty()) {
@@ -111,16 +105,17 @@ public class XiSessionService implements MinecraftSessionService {
             LOGGER.info("XiSessionService: Attempt " + attempts + "/" + providers.size() + ": Using " + provider.getName());
 
             try {
-                GameProfile profile = provider.authenticate(username, serverId);
+                Object profile = provider.authenticate(username, serverId);
                 if (profile != null) {
                     // 验证身份锁定
-                    boolean identityVerified = identityGuard.verifyIdentity(profile.getName(), profile.getId(), provider.getName());
+                    boolean identityVerified = verifyIdentityWithReflection(profile, provider.getName());
                     if (identityVerified) {
                         LOGGER.info("XiSessionService: Authentication successful with " + provider.getName() + " for " + username);
                         return profile;
                     } else {
                         // 身份验证失败，拒绝登录
-                        LOGGER.warning("XiSessionService: Login rejected for user " + profile.getName() + ": UUID mismatch caused by authentication mode switch.");
+                        String profileName = getProfileNameWithReflection(profile);
+                        LOGGER.warning("XiSessionService: Login rejected for user " + profileName + ": UUID mismatch caused by authentication mode switch.");
                         // 继续下一个提供者，可能是同一用户使用不同验证方式
                     }
                 } else {
@@ -138,33 +133,53 @@ public class XiSessionService implements MinecraftSessionService {
     }
 
     /**
-     * 原始方法，直接调用原始 SessionService
+     * 使用反射验证身份
+     * 
+     * @param profile  GameProfile 对象
+     * @param providerName 提供者名称
+     * @return 验证是否成功
      */
-    @Override
-    public void joinServer(GameProfile gameProfile, String s, String s1) throws AuthenticationUnavailableException {
-        originalSessionService.joinServer(gameProfile, s, s1);
+    private boolean verifyIdentityWithReflection(Object profile, String providerName) {
+        try {
+            // 使用反射获取名称和ID
+            String name = (String) profile.getClass().getMethod("getName").invoke(profile);
+            Object idObj = profile.getClass().getMethod("getId").invoke(profile);
+            // 将Object转换为UUID
+            java.util.UUID id = (java.util.UUID) idObj;
+            return identityGuard.verifyIdentity(name, id, providerName);
+        } catch (Exception e) {
+            LOGGER.warning("XiSessionService: Exception verifying identity: " + e.getMessage());
+            return false;
+        }
     }
 
     /**
-     * 原始方法，直接调用原始 SessionService
+     * 使用反射获取游戏档案名称
+     * 
+     * @param profile  GameProfile 对象
+     * @return 游戏档案名称
      */
-    @Override
-    public GameProfile fillProfileProperties(GameProfile gameProfile, boolean b) {
-        return originalSessionService.fillProfileProperties(gameProfile, b);
+    private String getProfileNameWithReflection(Object profile) {
+        try {
+            return (String) profile.getClass().getMethod("getName").invoke(profile);
+        } catch (Exception e) {
+            LOGGER.warning("XiSessionService: Exception getting profile name: " + e.getMessage());
+            return "unknown";
+        }
     }
 
     /**
      * 获取原始的 SessionService
-     *
+     * 
      * @return 原始 SessionService
      */
-    public MinecraftSessionService getOriginalSessionService() {
+    public Object getOriginalSessionService() {
         return originalSessionService;
     }
 
     /**
      * 获取验证提供者列表
-     *
+     * 
      * @return 验证提供者列表
      */
     public List<AuthProvider> getProviders() {
@@ -173,7 +188,7 @@ public class XiSessionService implements MinecraftSessionService {
 
     /**
      * 获取身份守护者
-     *
+     * 
      * @return 身份守护者
      */
     public IdentityGuard getIdentityGuard() {

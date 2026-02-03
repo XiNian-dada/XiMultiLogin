@@ -1,11 +1,10 @@
-package com.leeinx.ximultilogin;
+package com.Leeinx.ximultilogin;
 
-import com.leeinx.ximultilogin.auth.XiSessionService;
-import com.leeinx.ximultilogin.config.ConfigManager;
-import com.leeinx.ximultilogin.guard.IdentityGuard;
-import com.leeinx.ximultilogin.injector.XiInjector;
-import com.leeinx.ximultilogin.reflection.XiReflection;
-import com.mojang.authlib.minecraft.MinecraftSessionService;
+import com.Leeinx.ximultilogin.auth.XiSessionService;
+import com.Leeinx.ximultilogin.config.ConfigManager;
+import com.Leeinx.ximultilogin.guard.IdentityGuard;
+import com.Leeinx.ximultilogin.injector.XiInjector;
+import com.Leeinx.ximultilogin.reflection.XiReflection;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -20,214 +19,151 @@ public class XiMultiLogin extends JavaPlugin {
 
     private static final Logger LOGGER = Bukkit.getLogger();
     private ConfigManager configManager;
-    private XiInjector injector;
-    private XiSessionService xiSessionService;
     private IdentityGuard identityGuard;
+    private XiInjector xiInjector;
+    private Object originalSessionService;
+    private XiSessionService xiSessionService;
 
+    /**
+     * 插件加载时调用
+     */
+    @Override
+    public void onLoad() {
+        LOGGER.info("XiMultiLogin: Loading plugin...");
+        
+        // 初始化配置管理器
+        File dataFolder = getDataFolder();
+        if (!dataFolder.exists()) {
+            if (dataFolder.mkdirs()) {
+                LOGGER.info("XiMultiLogin: Created data folder");
+            } else {
+                LOGGER.severe("XiMultiLogin: Failed to create data folder");
+            }
+        }
+        configManager = new ConfigManager(this);
+        
+        // 初始化身份守护者
+        identityGuard = new IdentityGuard(configManager);
+        
+        // 初始化反射工具
+        XiReflection.init();
+        
+        // 初始化注入器
+        xiInjector = new XiInjector();
+        
+        LOGGER.info("XiMultiLogin: Plugin loaded successfully");
+    }
+
+    /**
+     * 插件启用时调用
+     */
     @Override
     public void onEnable() {
         LOGGER.info("XiMultiLogin: Enabling plugin...");
-
+        
+        // 注入会话服务
         try {
-            // 确保数据文件夹存在
-            if (!getDataFolder().exists()) {
-                if (getDataFolder().mkdirs()) {
-                    LOGGER.info("XiMultiLogin: Created data folder");
-                } else {
-                    LOGGER.severe("XiMultiLogin: Failed to create data folder");
-                    getServer().getPluginManager().disablePlugin(this);
-                    return;
-                }
-            }
-
-            // 初始化配置管理器
-            configManager = new ConfigManager(this);
-            LOGGER.info("XiMultiLogin: ConfigManager initialized");
-
-            // 初始化身份守护者
-            // 加载数据库配置
-            ConfigManager.DatabaseConfig dbConfig = configManager.getDatabaseConfig();
-            // 创建数据库管理器
-            com.leeinx.ximultilogin.database.DatabaseManager databaseManager = com.leeinx.ximultilogin.database.DatabaseFactory.createDatabaseManager(
-                    dbConfig.getType(),
-                    getDataFolder(),
-                    dbConfig.getHost(),
-                    dbConfig.getPort(),
-                    dbConfig.getDatabase(),
-                    dbConfig.getUsername(),
-                    dbConfig.getPassword()
-            );
-            // 初始化数据库管理器
-            databaseManager.initialize();
-            // 创建 IdentityGuard
-            identityGuard = new com.leeinx.ximultilogin.guard.IdentityGuard(databaseManager);
-            LOGGER.info("XiMultiLogin: IdentityGuard initialized with " + identityGuard.getIdentityCount() + " identities");
-
-            // 获取原始 SessionService
-            MinecraftSessionService originalSessionService = getOriginalSessionService();
+            originalSessionService = xiInjector.getOriginalSessionService();
             if (originalSessionService == null) {
-                LOGGER.severe("XiMultiLogin: Failed to get original SessionService");
+                LOGGER.severe("XiMultiLogin: Failed to get original session service");
                 getServer().getPluginManager().disablePlugin(this);
                 return;
             }
-
-            // 创建 XiSessionService
+            
+            // 创建自定义会话服务
             xiSessionService = new XiSessionService(originalSessionService, configManager, identityGuard);
-            LOGGER.info("XiMultiLogin: XiSessionService created");
-
-            // 初始化注入器并注入
-            injector = new XiInjector();
-            boolean injected = injector.inject(xiSessionService);
-            if (injected) {
-                LOGGER.info("XiMultiLogin: Plugin enabled successfully");
-                LOGGER.info("XiMultiLogin: Authentication pipeline initialized with " + xiSessionService.getProviders().size() + " providers");
-            } else {
-                LOGGER.severe("XiMultiLogin: Failed to inject XiSessionService");
+            
+            // 注入自定义会话服务
+            boolean injected = xiInjector.inject(xiSessionService);
+            if (!injected) {
+                LOGGER.severe("XiMultiLogin: Failed to inject session service");
                 getServer().getPluginManager().disablePlugin(this);
                 return;
             }
+            
+            LOGGER.info("XiMultiLogin: Session service injected successfully");
         } catch (Exception e) {
-            LOGGER.severe("XiMultiLogin: Exception during enable: " + e.getMessage());
+            LOGGER.severe("XiMultiLogin: Exception during injection: " + e.getMessage());
             e.printStackTrace();
             getServer().getPluginManager().disablePlugin(this);
+            return;
         }
+        
+        LOGGER.info("XiMultiLogin: Plugin enabled successfully");
     }
 
+    /**
+     * 插件禁用时调用
+     */
     @Override
     public void onDisable() {
         LOGGER.info("XiMultiLogin: Disabling plugin...");
-
-        try {
-            // 尝试卸载注入
-            if (injector != null && injector.isInjected()) {
-                boolean uninjected = injector.uninject();
-                if (uninjected) {
-                    LOGGER.info("XiMultiLogin: Successfully uninjected");
-                } else {
-                    LOGGER.warning("XiMultiLogin: Failed to uninject, but plugin is being disabled anyway");
-                }
-            }
-
-            // 保存身份数据并关闭数据库连接
-            if (identityGuard != null) {
-                identityGuard.save();
-                identityGuard.close();
-                LOGGER.info("XiMultiLogin: Identity data saved and database connection closed");
-            }
-
-            // 清理资源
-            injector = null;
-            xiSessionService = null;
-            identityGuard = null;
-            configManager = null;
-
-            LOGGER.info("XiMultiLogin: Plugin disabled successfully");
-        } catch (Exception e) {
-            LOGGER.severe("XiMultiLogin: Exception during disable: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * 获取原始的 SessionService
-     *
-     * @return 原始 SessionService
-     */
-    private MinecraftSessionService getOriginalSessionService() {
-        try {
-            // 获取服务器实例
-            Object serverHandle = XiReflection.getNMSHandle(getServer());
-            if (serverHandle == null) {
-                LOGGER.severe("XiMultiLogin: Failed to get server handle");
-                return null;
-            }
-
-            // 查找 SessionService 字段
-            java.lang.reflect.Field sessionServiceField = findSessionServiceField(serverHandle.getClass());
-            if (sessionServiceField == null) {
-                LOGGER.severe("XiMultiLogin: Failed to find SessionService field");
-                return null;
-            }
-
-            // 获取原始 SessionService
-            Object sessionService = XiReflection.getFieldValue(serverHandle, sessionServiceField);
-            if (sessionService == null) {
-                LOGGER.severe("XiMultiLogin: SessionService is null");
-                return null;
-            }
-
-            if (sessionService instanceof MinecraftSessionService) {
-                LOGGER.info("XiMultiLogin: Found original SessionService: " + sessionService.getClass().getName());
-                return (MinecraftSessionService) sessionService;
-            } else {
-                LOGGER.severe("XiMultiLogin: Found object is not a MinecraftSessionService: " + sessionService.getClass().getName());
-                return null;
-            }
-        } catch (Exception e) {
-            LOGGER.severe("XiMultiLogin: Exception getting original SessionService: " + e.getMessage());
-            e.printStackTrace();
-            return null;
-        }
-    }
-
-    /**
-     * 查找 SessionService 字段
-     *
-     * @param serverClass 服务器类
-     * @return SessionService 字段
-     */
-    private java.lang.reflect.Field findSessionServiceField(Class<?> serverClass) {
-        // 尝试通过类型查找
-        java.lang.reflect.Field field = XiReflection.getFieldByType(serverClass, MinecraftSessionService.class);
-        if (field != null) {
-            return field;
-        }
-
-        // 尝试常见的字段名称
-        String[] possibleFieldNames = {
-                "sessionService",
-                "authenticationService",
-                "authService",
-                "sessionManager"
-        };
-
-        for (String fieldName : possibleFieldNames) {
+        
+        // 恢复原始会话服务
+        if (originalSessionService != null && xiInjector != null) {
             try {
-                java.lang.reflect.Field f = serverClass.getDeclaredField(fieldName);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException e) {
-                // 字段不存在，继续尝试下一个
+                boolean restored = xiInjector.restore(originalSessionService);
+                if (restored) {
+                    LOGGER.info("XiMultiLogin: Original session service restored");
+                } else {
+                    LOGGER.warning("XiMultiLogin: Failed to restore original session service");
+                }
+            } catch (Exception e) {
+                LOGGER.severe("XiMultiLogin: Exception during restoration: " + e.getMessage());
+                e.printStackTrace();
             }
         }
-
-        return null;
+        
+        // 关闭数据库连接
+        if (identityGuard != null) {
+            identityGuard.close();
+        }
+        
+        LOGGER.info("XiMultiLogin: Plugin disabled successfully");
     }
 
     /**
      * 获取配置管理器
-     *
-     * @return 配置管理器
+     * 
+     * @return 配置管理器实例
      */
     public ConfigManager getConfigManager() {
         return configManager;
     }
 
     /**
-     * 获取 XiSessionService
-     *
-     * @return XiSessionService
-     */
-    public XiSessionService getXiSessionService() {
-        return xiSessionService;
-    }
-
-    /**
      * 获取身份守护者
-     *
-     * @return 身份守护者
+     * 
+     * @return 身份守护者实例
      */
     public IdentityGuard getIdentityGuard() {
         return identityGuard;
+    }
+
+    /**
+     * 获取注入器
+     * 
+     * @return 注入器实例
+     */
+    public XiInjector getXiInjector() {
+        return xiInjector;
+    }
+
+    /**
+     * 获取原始会话服务
+     * 
+     * @return 原始会话服务实例
+     */
+    public Object getOriginalSessionService() {
+        return originalSessionService;
+    }
+
+    /**
+     * 获取自定义会话服务
+     * 
+     * @return 自定义会话服务实例
+     */
+    public XiSessionService getXiSessionService() {
+        return xiSessionService;
     }
 }

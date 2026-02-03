@@ -75,14 +75,33 @@ public class XiReflection {
 
                     Field innerField = getFieldByType(wrapperObj.getClass(), sessionType);
                     if (innerField != null) {
-                        LOGGER.info("XiReflection: Found container: " + wrapperField.getName() + " (IsRecord: " + wrapperObj.getClass().isRecord() + ")");
-                        return new Object[]{ minecraftServer, wrapperField, wrapperObj.getClass().isRecord() };
+                        boolean isRecord = isRecordClass(wrapperObj.getClass());
+                        LOGGER.info("XiReflection: Found container: " + wrapperField.getName() + " (IsRecord: " + isRecord + ")");
+                        return new Object[]{ minecraftServer, wrapperField, isRecord };
                     }
                 } catch (Exception ignored) {}
             }
             clazz = clazz.getSuperclass();
         }
         return null;
+    }
+
+    /**
+     * 检查一个类是否是 Java Record 类
+     * 使用反射方式检测，兼容 Java 8+
+     * 
+     * @param clazz 要检查的类
+     * @return 如果是 Record 类返回 true，否则返回 false
+     */
+    private static boolean isRecordClass(Class<?> clazz) {
+        try {
+            // 尝试调用 isRecord() 方法
+            Method isRecordMethod = clazz.getClass().getMethod("isRecord");
+            return (boolean) isRecordMethod.invoke(clazz);
+        } catch (Exception e) {
+            // 如果方法不存在，说明不是 Record 类
+            return false;
+        }
     }
 
     private static boolean shouldSkip(Field f) {
@@ -138,27 +157,39 @@ public class XiReflection {
     private static boolean reconstructAndSwapRecord(Object targetHolder, Field holderField, Object oldRecord, Object newSessionService, Class<?> sessionType) {
         try {
             Class<?> recordClass = oldRecord.getClass();
-            RecordComponent[] components = recordClass.getRecordComponents();
+            
+            // 使用反射获取 Record 组件
+            Object[] components = getRecordComponents(recordClass);
+            if (components == null) {
+                LOGGER.severe("XiReflection: Failed to get record components");
+                return false;
+            }
+            
             Object[] newArgs = new Object[components.length];
             Class<?>[] paramTypes = new Class<?>[components.length];
 
             for (int i = 0; i < components.length; i++) {
-                RecordComponent rc = components[i];
-                paramTypes[i] = rc.getType();
+                Object rc = components[i];
                 
-                Method accessor = rc.getAccessor();
+                // 使用反射获取 Record 组件的类型和访问方法
+                Class<?> componentType = getRecordComponentType(rc);
+                Method accessor = getRecordComponentAccessor(rc);
+                String componentName = getRecordComponentName(rc);
+                
+                paramTypes[i] = componentType;
+                
                 accessor.setAccessible(true);
                 Object value = accessor.invoke(oldRecord);
 
                 // 判断是否是 SessionService 字段 (通过类名判断，忽略 ClassLoader 差异)
-                if (rc.getType().getName().equals(sessionType.getName())) {
-                    LOGGER.info("XiReflection: Swapping " + rc.getName() + " with Loose Proxy.");
+                if (componentType.getName().equals(sessionType.getName())) {
+                    LOGGER.info("XiReflection: Swapping " + componentName + " with Loose Proxy.");
                     
                     // ★★★ 核心修复：智能参数适配代理 (Smart Parameter Adapter Proxy) ★★★
                     // 使用 Record 组件期待的 ClassLoader 和 接口类型
                     Object proxy = Proxy.newProxyInstance(
-                        rc.getType().getClassLoader(),
-                        new Class<?>[]{ rc.getType() }, // 强制使用 Record 要求的接口
+                        componentType.getClassLoader(),
+                        new Class<?>[]{ componentType }, // 强制使用 Record 要求的接口
                         (proxyObj, method, args) -> {
                             try {
                                 // 尝试直接调用，使用松散匹配
@@ -232,6 +263,68 @@ public class XiReflection {
             LOGGER.severe("XiReflection: Reconstruction failed: " + e.getMessage());
             e.printStackTrace();
             return false;
+        }
+    }
+
+    /**
+     * 使用反射获取 Record 组件
+     * 兼容 Java 8+
+     * 
+     * @param recordClass Record 类
+     * @return Record 组件数组
+     */
+    private static Object[] getRecordComponents(Class<?> recordClass) {
+        try {
+            Method getRecordComponentsMethod = recordClass.getMethod("getRecordComponents");
+            return (Object[]) getRecordComponentsMethod.invoke(recordClass);
+        } catch (Exception e) {
+            LOGGER.warning("XiReflection: Failed to get record components: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 使用反射获取 Record 组件的类型
+     * 
+     * @param recordComponent Record 组件
+     * @return 组件类型
+     */
+    private static Class<?> getRecordComponentType(Object recordComponent) {
+        try {
+            Method getTypeMethod = recordComponent.getClass().getMethod("getType");
+            return (Class<?>) getTypeMethod.invoke(recordComponent);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get record component type", e);
+        }
+    }
+
+    /**
+     * 使用反射获取 Record 组件的访问方法
+     * 
+     * @param recordComponent Record 组件
+     * @return 访问方法
+     */
+    private static Method getRecordComponentAccessor(Object recordComponent) {
+        try {
+            Method getAccessorMethod = recordComponent.getClass().getMethod("getAccessor");
+            return (Method) getAccessorMethod.invoke(recordComponent);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get record component accessor", e);
+        }
+    }
+
+    /**
+     * 使用反射获取 Record 组件的名称
+     * 
+     * @param recordComponent Record 组件
+     * @return 组件名称
+     */
+    private static String getRecordComponentName(Object recordComponent) {
+        try {
+            Method getNameMethod = recordComponent.getClass().getMethod("getName");
+            return (String) getNameMethod.invoke(recordComponent);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get record component name", e);
         }
     }
 

@@ -4,6 +4,7 @@ import com.Leeinx.ximultilogin.auth.providers.MojangAuthProvider;
 import com.Leeinx.ximultilogin.auth.providers.YggdrasilAuthProvider;
 import com.Leeinx.ximultilogin.config.ConfigManager;
 import com.Leeinx.ximultilogin.guard.IdentityGuard;
+import com.Leeinx.ximultilogin.listener.PlayerLoginListener;
 import org.bukkit.Bukkit;
 
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ public class XiSessionService {
     private final Object originalSessionService;
     private final IdentityGuard identityGuard;
     private final ConfigManager configManager;
+    private final PlayerLoginListener loginListener;
 
     /**
      * 构造 XiSessionService
@@ -29,11 +31,13 @@ public class XiSessionService {
      * @param originalSessionService 原始的 SessionService 实例
      * @param configManager          配置管理器
      * @param identityGuard          身份守护者
+     * @param loginListener          登录监听器
      */
-    public XiSessionService(Object originalSessionService, ConfigManager configManager, IdentityGuard identityGuard) {
+    public XiSessionService(Object originalSessionService, ConfigManager configManager, IdentityGuard identityGuard, PlayerLoginListener loginListener) {
         this.originalSessionService = originalSessionService;
         this.identityGuard = identityGuard;
         this.configManager = configManager;
+        this.loginListener = loginListener;
         this.providers = new ArrayList<>();
         this.providerMap = new java.util.HashMap<>();
         initializeProviders(configManager);
@@ -133,10 +137,22 @@ public class XiSessionService {
                         // 验证失败 -> 拒绝登录
                         LOGGER.warning("XiSessionService: Strict auth FAILED. Player locked to " + storedAuthProvider + " but verification failed.");
                         LOGGER.warning("XiSessionService: Rejecting login to prevent identity theft.");
+                        
+                        // 记录认证失败原因，用于显示自定义消息
+                        if (loginListener != null) {
+                            loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
+                        }
+                        
                         return null; // 直接返回 null，阻止后续流程
                     }
                 } catch (Exception e) {
                     LOGGER.severe("XiSessionService: Provider error: " + e.getMessage());
+                    
+                    // 记录认证失败原因
+                    if (loginListener != null) {
+                        loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
+                    }
+                    
                     return null;
                 }
             } else {
@@ -164,6 +180,11 @@ public class XiSessionService {
         }
 
         LOGGER.info("XiSessionService: All providers failed to authenticate " + username);
+        
+        // 记录所有认证方式都失败
+        if (loginListener != null) {
+            loginListener.recordAuthFailure(username, "all_providers_failed", null);
+        }
         
         // 检查是否允许盗版玩家
         if (configManager.isAllowCracked()) {

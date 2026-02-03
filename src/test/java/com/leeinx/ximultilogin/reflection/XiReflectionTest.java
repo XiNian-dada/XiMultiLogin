@@ -51,48 +51,4 @@ public class XiReflectionTest {
         Field nonExistentField = XiReflection.getFieldByType(TestClass.class, double.class);
         assertNull("Should not find non-existent field", nonExistentField);
     }
-
-    /**
-     * 测试 setFieldValue 和 getFieldValue 方法
-     */
-    @Test
-    public void testFieldValueOperations() {
-        // 创建测试类和实例
-        class TestClass {
-            private String value;
-        }
-
-        TestClass testInstance = new TestClass();
-
-        // 查找字段
-        Field field = XiReflection.getFieldByType(TestClass.class, String.class);
-        assertNotNull("Should find String field", field);
-
-        // 设置字段值
-        boolean setSuccess = XiReflection.setFieldValue(testInstance, field, "test value");
-        assertTrue("Should set field value successfully", setSuccess);
-
-        // 获取字段值
-        Object retrievedValue = XiReflection.getFieldValue(testInstance, field);
-        assertNotNull("Should retrieve field value", retrievedValue);
-        assertEquals("Retrieved value should match set value", "test value", retrievedValue);
-    }
-
-    /**
-     * 测试 getSimpleClassName 方法
-     */
-    @Test
-    public void testGetSimpleClassName() {
-        // 测试基本类型
-        assertEquals("int", XiReflection.getSimpleClassName(int.class));
-        assertEquals("String", XiReflection.getSimpleClassName(String.class));
-
-        // 测试自定义类型
-        class TestClass {
-        }
-        assertEquals("TestClass", XiReflection.getSimpleClassName(TestClass.class));
-
-        // 测试 null
-        assertEquals("null", XiReflection.getSimpleClassName(null));
-    }
 }

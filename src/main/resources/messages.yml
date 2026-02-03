@@ -3,6 +3,11 @@
 # 支持颜色代码，如 &c, &a 等
 # 支持变量替换，如 {player}, {reason} 等
 
+# 插件前缀配置
+# 所有插件消息都会自动添加此前缀
+# 设置为空字符串 "" 可以禁用前缀
+prefix: "&6[XiMultiLogin] &r"
+
 # 登录相关消息
 login:
   # 登录成功
@@ -15,6 +20,14 @@ login:
   auth_changed: "&a认证方式已变更为 {provider}！"
   # 盗版玩家登录
   cracked: "&e登录成功（盗版模式）：欢迎，{player}！"
+  # 严格认证失败（玩家被锁定到某种认证方式但验证失败）
+  strict_auth_failed: "&c认证失败：您被锁定使用 {provider} 认证，但验证失败！"
+  # 所有认证方式都失败
+  all_providers_failed: "&c认证失败：所有认证方式均无法验证您的身份！"
+  # Mojang 认证失败
+  mojang_failed: "&cMojang 认证失败：请检查您的正版账户状态！"
+  # Yggdrasil 认证失败
+  yggdrasil_failed: "&c认证失败：无法通过 {provider} 验证您的身份！"
 
 # 错误消息
 error:

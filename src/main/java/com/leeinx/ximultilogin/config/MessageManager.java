@@ -91,13 +91,25 @@ public class MessageManager {
     }
 
     /**
-     * 获取消息
+     * 获取消息（自动添加前缀）
      *
      * @param key 消息键
      * @param replacements 变量替换
-     * @return 处理后的消息
+     * @return 处理后的消息（带前缀）
      */
     public String getMessage(String key, Object... replacements) {
+        return getMessage(key, true, replacements);
+    }
+
+    /**
+     * 获取消息
+     *
+     * @param key 消息键
+     * @param withPrefix 是否添加前缀
+     * @param replacements 变量替换
+     * @return 处理后的消息
+     */
+    public String getMessage(String key, boolean withPrefix, Object... replacements) {
         // 从缓存获取消息
         String message = messageCache.get(key);
         if (message == null) {
@@ -119,7 +131,18 @@ public class MessageManager {
         }
 
         // 处理颜色代码
-        return ChatColor.translateAlternateColorCodes('&', message);
+        message = ChatColor.translateAlternateColorCodes('&', message);
+
+        // 添加前缀
+        if (withPrefix) {
+            String prefix = getPrefix();
+            if (prefix != null && !prefix.isEmpty()) {
+                prefix = ChatColor.translateAlternateColorCodes('&', prefix);
+                message = prefix + message;
+            }
+        }
+
+        return message;
     }
 
     /**
@@ -151,6 +174,15 @@ public class MessageManager {
      */
     public FileConfiguration getMessages() {
         return messages;
+    }
+
+    /**
+     * 获取插件前缀
+     *
+     * @return 插件前缀
+     */
+    public String getPrefix() {
+        return messages.getString("prefix", "&6[XiMultiLogin] &r");
     }
 
     /**

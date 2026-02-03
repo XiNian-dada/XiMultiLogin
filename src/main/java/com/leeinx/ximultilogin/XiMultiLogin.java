@@ -7,6 +7,7 @@ import com.Leeinx.ximultilogin.guard.IdentityGuard;
 import com.Leeinx.ximultilogin.command.XiCommandExecutor;
 import com.Leeinx.ximultilogin.command.XiTabCompleter;
 import com.Leeinx.ximultilogin.injector.XiInjector;
+import com.Leeinx.ximultilogin.listener.PlayerLoginListener;
 import com.Leeinx.ximultilogin.reflection.XiReflection;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -28,6 +29,7 @@ public class XiMultiLogin extends JavaPlugin {
     private XiInjector xiInjector;
     private Object originalSessionService;
     private XiSessionService xiSessionService;
+    private PlayerLoginListener loginListener;
 
     /**
      * 插件加载时调用
@@ -69,6 +71,11 @@ public class XiMultiLogin extends JavaPlugin {
     public void onEnable() {
         LOGGER.info("XiMultiLogin: Enabling plugin...");
         
+        // 注册登录监听器
+        loginListener = new PlayerLoginListener(this);
+        getServer().getPluginManager().registerEvents(loginListener, this);
+        LOGGER.info("XiMultiLogin: Player login listener registered");
+        
         // 注入会话服务
         try {
             originalSessionService = xiInjector.getOriginalSessionService();
@@ -79,7 +86,7 @@ public class XiMultiLogin extends JavaPlugin {
             }
             
             // 创建自定义会话服务
-            xiSessionService = new XiSessionService(originalSessionService, configManager, identityGuard);
+            xiSessionService = new XiSessionService(originalSessionService, configManager, identityGuard, loginListener);
             
             // 注入自定义会话服务
             boolean injected = xiInjector.inject(xiSessionService);

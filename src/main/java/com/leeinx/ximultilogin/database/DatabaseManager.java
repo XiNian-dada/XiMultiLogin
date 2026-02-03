@@ -29,6 +29,16 @@ public interface DatabaseManager {
      * @return 是否存储成功
      */
     boolean storeIdentity(String name, UUID uuid, String authProvider);
+    
+    /**
+     * 更新玩家的认证提供者
+     * 
+     * @param name 玩家名称
+     * @param uuid 玩家 UUID
+     * @param authProvider 认证提供者名称
+     * @return 是否更新成功
+     */
+    boolean updateAuthProvider(String name, UUID uuid, String authProvider);
 
     /**
      * 获取玩家的 UUID

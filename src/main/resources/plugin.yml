@@ -1,6 +1,43 @@
 name: XiMultiLogin
 main: com.Leeinx.ximultilogin.XiMultiLogin
-version: 1.0
-authors: [Leeinx Team]
+version: ${project.version}
+author: XiLogin Team
 description: A Minecraft plugin that supports multiple authentication methods
 api-version: 1.16
+
+commands:
+  ximultilogin:
+    description: XiMultiLogin plugin commands
+    usage: /ximultilogin <subcommand>
+    aliases: [xml, xilogin]
+    permission: ximultilogin.use
+
+permissions:
+  ximultilogin.use:
+    description: Allows using basic XiMultiLogin commands
+    default: op
+  ximultilogin.setauth:
+    description: Allows setting player authentication method
+    default: op
+  ximultilogin.getauth:
+    description: Allows getting player authentication method
+    default: op
+  ximultilogin.reload:
+    description: Allows reloading XiMultiLogin config
+    default: op
+  ximultilogin.info:
+    description: Allows viewing XiMultiLogin info
+    default: true
+  ximultilogin.allowcracked:
+    description: Allows setting whether to allow cracked players
+    default: op
+  ximultilogin.*:
+    description: All XiMultiLogin permissions
+    default: op
+    children:
+      ximultilogin.use: true
+      ximultilogin.setauth: true
+      ximultilogin.getauth: true
+      ximultilogin.reload: true
+      ximultilogin.info: true
+      ximultilogin.allowcracked: true

@@ -1,0 +1,85 @@
+# XiMultiLogin 消息配置文件
+# 这里可以配置插件的所有消息
+# 支持颜色代码，如 &c, &a 等
+# 支持变量替换，如 {player}, {reason} 等
+
+# 登录相关消息
+login:
+  # 登录成功
+  success: "&a登录成功！欢迎回来，{player}！"
+  # 登录失败
+  failed: "&c登录失败：{reason}"
+  # 昵称重合
+  name_taken: "&c登录失败：该昵称已被使用，请选择其他昵称！"
+  # 认证方式变更
+  auth_changed: "&a认证方式已变更为 {provider}！"
+  # 盗版玩家登录
+  cracked: "&e登录成功（盗版模式）：欢迎，{player}！"
+
+# 错误消息
+error:
+  # 认证失败
+  authentication: "&c认证失败：无法验证您的身份！"
+  # 权限不足
+  no_permission: "&c权限不足：您没有执行此操作的权限！"
+  # 参数错误
+  invalid_args: "&c参数错误：请检查命令参数！"
+  # 玩家未找到
+  player_not_found: "&c错误：玩家 {player} 未找到！"
+  # 配置错误
+  config_error: "&c配置错误：{reason}"
+  # 数据库错误
+  database: "&c数据库错误：{reason}"
+
+# 命令相关消息
+command:
+  # 指令执行成功
+  success: "&a操作成功！"
+  # 设置认证方式成功
+  set_auth: "&a成功设置玩家 {player} 的认证方式为 {auth}！"
+  # 获取认证方式
+  get_auth: "&a玩家 {player} 的当前认证方式：{auth}"
+  # 设置允许盗版
+  set_allow_cracked: "&a成功设置允许盗版玩家加入：{value}"
+  # 获取允许盗版设置
+  get_allow_cracked: "&a当前允许盗版玩家加入的设置：{value}"
+  # 重新加载配置
+  reloaded: "&a配置已重新加载！"
+  # 重新加载消息
+  messages_reloaded: "&a消息配置已重新加载！"
+
+# 系统消息
+system:
+  # 插件加载
+  enabled: "&aXiMultiLogin 插件已启用！"
+  # 插件禁用
+  disabled: "&cXiMultiLogin 插件已禁用！"
+  # 消息配置加载
+  messages_loaded: "&a消息配置加载成功！"
+  # 消息配置重载
+  messages_reload: "&a消息配置已重载！"
+
+# 其他消息
+other:
+  # 未知指令
+  unknown_command: "&c未知指令：请使用 /ximultilogin help 查看帮助！"
+  # 帮助信息
+  help: "&a使用 /ximultilogin help 查看指令帮助！"
+  # 帮助菜单
+  help_menu:
+    title: "&6===== XiMultiLogin 指令帮助 ====="
+    setauth: "&a/ximultilogin setauth <玩家名> <认证类型> - 设置玩家的认证方式"
+    getauth: "&a/ximultilogin getauth <玩家名> - 获取玩家的当前认证方式"
+    allowcracked: "&a/ximultilogin allowcracked <true|false> - 设置是否允许盗版玩家加入"
+    allowcracked_status: "&a/ximultilogin allowcracked - 查看当前设置"
+    reload: "&a/ximultilogin reload - 重新加载配置文件"
+    info: "&a/ximultilogin info - 显示插件信息"
+    footer: "&6============================="
+  # 插件信息
+  info:
+    title: "&6===== XiMultiLogin 插件信息 ====="
+    version: "&a版本: 1.0"
+    author: "&a作者: XiLogin Team"
+    description: "&a描述: 多登录方式支持插件"
+    command: "&a指令: /ximultilogin help"
+    footer: "&6==============================="

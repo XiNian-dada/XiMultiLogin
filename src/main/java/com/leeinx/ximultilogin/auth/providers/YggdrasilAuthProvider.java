@@ -1,21 +1,19 @@
 package com.Leeinx.ximultilogin.auth.providers;
 
 import com.Leeinx.ximultilogin.auth.AuthProvider;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.bukkit.Bukkit;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.logging.Logger;
 
-/**
- * Yggdrasil 认证提供者
- * 实现 Yggdrasil 协议认证（支持皮肤站）
- */
 public class YggdrasilAuthProvider implements AuthProvider {
 
     private static final Logger LOGGER = Bukkit.getLogger();
@@ -23,180 +21,136 @@ public class YggdrasilAuthProvider implements AuthProvider {
     private final String apiUrl;
     private final boolean enabled;
 
-    /**
-     * 构造 YggdrasilAuthProvider
-     * 
-     * @param name    提供者名称
-     * @param apiUrl  Yggdrasil API 地址
-     * @param enabled 是否启用
-     */
     public YggdrasilAuthProvider(String name, String apiUrl, boolean enabled) {
         this.name = name;
         this.apiUrl = apiUrl;
         this.enabled = enabled;
     }
 
-    /**
-     * 执行 Yggdrasil 认证
-     * 
-     * @param username 玩家名称
-     * @param serverId 服务器唯一标识符
-     * @return 认证成功返回 GameProfile，认证失败返回 null
-     */
     @Override
     public Object authenticate(String username, String serverId) {
-        if (!enabled) {
-            LOGGER.info(name + "AuthProvider: Provider is disabled");
-            return null;
-        }
+        if (!enabled) return null;
 
         try {
-            LOGGER.info(name + "AuthProvider: Authenticating " + username + " with " + apiUrl);
-            
-            // 构建请求URL
-            URL url = new URL(apiUrl + "/sessionserver/session/minecraft/hasJoined");
+            // URL 处理
+            String cleanApiUrl = apiUrl.endsWith("/") ? apiUrl.substring(0, apiUrl.length() - 1) : apiUrl;
+            String endpoint = cleanApiUrl + "/sessionserver/session/minecraft/hasJoined";
+            String encodedUsername = java.net.URLEncoder.encode(username, StandardCharsets.UTF_8.toString());
+            String encodedServerId = java.net.URLEncoder.encode(serverId, StandardCharsets.UTF_8.toString());
+            String urlString = endpoint + "?username=" + encodedUsername + "&serverId=" + encodedServerId;
+            URL url = new URL(urlString);
+
+            LOGGER.info(name + "AuthProvider: Authenticating " + username + " with API Root: " + cleanApiUrl);
+
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            
-            // 设置请求参数
-            String params = "username=" + username + "&serverId=" + serverId;
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            connection.setRequestProperty("Content-Length", String.valueOf(params.getBytes().length));
-            connection.setDoOutput(true);
-            
-            // 发送请求
-            try (OutputStream os = connection.getOutputStream()) {
-                os.write(params.getBytes(StandardCharsets.UTF_8));
-                os.flush();
-            }
-            
-            // 读取响应
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+
             int responseCode = connection.getResponseCode();
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                try (BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+            
+            if (responseCode == 200) {
+                try (BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
                     StringBuilder response = new StringBuilder();
                     String inputLine;
-                    while ((inputLine = in.readLine()) != null) {
-                        response.append(inputLine);
-                    }
-                    
-                    // 解析响应
-                    return parseResponse(response.toString(), username);
+                    while ((inputLine = in.readLine()) != null) response.append(inputLine);
+
+                    // ★★★ 核心修复：使用 Gson 解析 JSON，不再手写字符串截取 ★★★
+                    return parseResponseWithGson(response.toString(), username);
                 }
+            } else if (responseCode == 204) {
+                // 204 代表验证未通过（账号密码错或未购买）
+                LOGGER.info(name + "AuthProvider: 204 No Content (Verify Failed)");
             } else {
-                LOGGER.info(name + "AuthProvider: Authentication failed for " + username + ", response code: " + responseCode);
-                return null;
+                LOGGER.info(name + "AuthProvider: HTTP " + responseCode);
             }
         } catch (Exception e) {
-            LOGGER.warning(name + "AuthProvider: Exception during authentication: " + e.getMessage());
-            return null;
+            LOGGER.warning(name + "AuthProvider: Network/Parse Error: " + e.getMessage());
+            e.printStackTrace();
         }
+        return null;
     }
 
-    /**
-     * 解析 Yggdrasil 响应
-     * 
-     * @param response 响应内容
-     * @param username 玩家名称
-     * @return 解析成功返回 GameProfile，解析失败返回 null
-     */
-    private Object parseResponse(String response, String username) {
+    private Object parseResponseWithGson(String jsonString, String originalName) {
         try {
-            // 简单的 JSON 解析（实际项目中应该使用 JSON 库）
-            // 这里使用字符串操作来提取信息
+            // 使用 Spigot 自带的 Gson 解析器
+            JsonObject json = new JsonParser().parse(jsonString).getAsJsonObject();
             
-            // 提取 UUID
-            String uuidStr = extractValue(response, "id");
-            if (uuidStr == null) {
-                return null;
+            // 1. 提取 UUID (兼容带横线和不带横线)
+            String idStr = json.get("id").getAsString();
+            UUID uuid = parseUUID(idStr);
+            
+            // 2. 提取名称
+            String name = json.has("name") ? json.get("name").getAsString() : originalName;
+            
+            // 3. 反射创建 GameProfile
+            Object profile = createGameProfile(uuid, name);
+            if (profile == null) return null;
+
+            // 4. 提取皮肤属性 (Properties)
+            if (json.has("properties")) {
+                JsonArray props = json.getAsJsonArray("properties");
+                addPropertiesToProfile(profile, props);
             }
-            UUID uuid = UUID.fromString(uuidStr.replaceAll("[\\s]", ""));
             
-            // 提取名称
-            String name = extractValue(response, "name");
-            if (name == null) {
-                name = username;
-            } else {
-                name = name.replaceAll("[\\s]", "");
-            }
-            
-            // 使用反射创建 GameProfile
-            return createGameProfile(uuid, name);
+            return profile;
+
         } catch (Exception e) {
-            LOGGER.warning(name + "AuthProvider: Exception parsing response: " + e.getMessage());
+            LOGGER.warning(name + "AuthProvider: JSON Parse Failed: " + e.getMessage());
+            LOGGER.warning("JSON Debug: " + jsonString); // 打印出来方便调试
             return null;
         }
     }
 
-    /**
-     * 使用反射创建 GameProfile 对象
-     * 
-     * @param uuid  UUID
-     * @param name  用户名
-     * @return GameProfile 对象
-     */
+    private UUID parseUUID(String id) {
+        if (id == null) return null;
+        try {
+            if (id.contains("-")) return UUID.fromString(id);
+            // 补全 UUID 连字符
+            return UUID.fromString(id.replaceFirst(
+                "(\\w{8})(\\w{4})(\\w{4})(\\w{4})(\\w{12})", "$1-$2-$3-$4-$5"));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // 反射创建 GameProfile (保持不变)
     private Object createGameProfile(UUID uuid, String name) {
         try {
-            // 加载 GameProfile 类
-            Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
-            // 获取构造函数
-            java.lang.reflect.Constructor<?> constructor = gameProfileClass.getConstructor(UUID.class, String.class);
-            // 创建实例
-            return constructor.newInstance(uuid, name);
+            Class<?> gpClass = Class.forName("com.mojang.authlib.GameProfile");
+            return gpClass.getConstructor(UUID.class, String.class).newInstance(uuid, name);
+        } catch (Exception e) { e.printStackTrace(); return null; }
+    }
+
+    // 反射填充 Properties (保持不变)
+    private void addPropertiesToProfile(Object profile, JsonArray jsonProps) {
+        try {
+            Class<?> gpClass = profile.getClass();
+            Object propertyMap = gpClass.getMethod("getProperties").invoke(profile);
+            java.lang.reflect.Method putMethod = propertyMap.getClass().getMethod("put", Object.class, Object.class);
+            
+            Class<?> propClass = Class.forName("com.mojang.authlib.properties.Property");
+            java.lang.reflect.Constructor<?> propCons = propClass.getConstructor(String.class, String.class, String.class);
+            java.lang.reflect.Constructor<?> propCons2 = propClass.getConstructor(String.class, String.class);
+
+            for (int i = 0; i < jsonProps.size(); i++) {
+                JsonObject p = jsonProps.get(i).getAsJsonObject();
+                String pName = p.get("name").getAsString();
+                String pValue = p.get("value").getAsString();
+                
+                Object propertyObj;
+                if (p.has("signature")) {
+                    propertyObj = propCons.newInstance(pName, pValue, p.get("signature").getAsString());
+                } else {
+                    propertyObj = propCons2.newInstance(pName, pValue);
+                }
+                putMethod.invoke(propertyMap, pName, propertyObj);
+            }
         } catch (Exception e) {
-            LOGGER.warning(name + "AuthProvider: Exception creating GameProfile: " + e.getMessage());
-            return null;
+            LOGGER.warning("Failed to add properties: " + e.getMessage());
         }
     }
 
-    /**
-     * 从 JSON 字符串中提取值
-     * 
-     * @param json  JSON 字符串
-     * @param key  键名
-     * @return 提取的值
-     */
-    private String extractValue(String json, String key) {
-        String searchKey = key + ": ";
-        int startIndex = json.indexOf(searchKey);
-        if (startIndex == -1) {
-            return null;
-        }
-        startIndex += searchKey.length();
-        // 跳过引号
-        if (startIndex < json.length() && json.charAt(startIndex) == '"') {
-            startIndex++;
-        }
-        int endIndex = json.indexOf('"', startIndex);
-        if (endIndex == -1) {
-            endIndex = json.indexOf(',', startIndex);
-        }
-        if (endIndex == -1) {
-            endIndex = json.indexOf('}', startIndex);
-        }
-        if (endIndex == -1) {
-            return null;
-        }
-        return json.substring(startIndex, endIndex).trim();
-    }
-
-    /**
-     * 获取提供者名称
-     * 
-     * @return 提供者名称
-     */
-    @Override
-    public String getName() {
-        return name;
-    }
-
-    /**
-     * 检查提供者是否启用
-     * 
-     * @return 是否启用
-     */
-    @Override
-    public boolean isEnabled() {
-        return enabled;
-    }
+    @Override public String getName() { return name; }
+    @Override public boolean isEnabled() { return enabled; }
 }

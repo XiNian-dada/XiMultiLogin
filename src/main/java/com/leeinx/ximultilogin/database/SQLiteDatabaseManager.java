@@ -188,6 +188,32 @@ public class SQLiteDatabaseManager implements DatabaseManager {
     }
 
     /**
+     * 更新玩家的认证提供者
+     * 
+     * @param name 玩家名称
+     * @param uuid 玩家 UUID
+     * @param authProvider 认证提供者名称
+     * @return 是否更新成功
+     */
+    @Override
+    public boolean updateAuthProvider(String name, UUID uuid, String authProvider) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(
+                     "UPDATE identities SET auth_provider = ? WHERE name = ? AND uuid = ?")) {
+            
+            pstmt.setString(1, authProvider);
+            pstmt.setString(2, name);
+            pstmt.setString(3, uuid.toString());
+            
+            int rows = pstmt.executeUpdate();
+            return rows > 0;
+        } catch (SQLException e) {
+            LOGGER.severe("SQLiteDatabaseManager: Failed to update auth provider: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 删除玩家身份
      * 
      * @param name 玩家名称

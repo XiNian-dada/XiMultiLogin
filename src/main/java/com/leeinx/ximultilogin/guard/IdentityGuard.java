@@ -54,24 +54,49 @@ public class IdentityGuard {
                 return false;
             }
         } else {
-            // 老玩家，检查 UUID 是否匹配
-            if (storedUuid.equals(incomingUuid)) {
-                // UUID 匹配，检查认证方式是否一致
-                String storedAuthProvider = databaseManager.getAuthProvider(name);
-                if (storedAuthProvider != null && !storedAuthProvider.equals(authProvider)) {
-                    // 认证方式变更，更新记录
-                    boolean updated = databaseManager.storeIdentity(name, incomingUuid, authProvider);
-                    if (updated) {
-                        LOGGER.info("IdentityGuard: Auth provider updated for " + name + ": " + storedAuthProvider + " -> " + authProvider);
-                    }
-                }
-                LOGGER.info("IdentityGuard: Identity verified: " + name + " -> " + incomingUuid);
-                return true;
-            } else {
-                // UUID 不匹配，拒绝登录
-                LOGGER.warning("IdentityGuard: Identity verification failed: " + name + " -> " + incomingUuid + " (expected: " + storedUuid + ")");
-                return false;
+            // 老玩家，更新认证方式，保持UUID不变
+            boolean updated = databaseManager.updateAuthProvider(name, storedUuid, authProvider);
+            if (updated) {
+                LOGGER.info("IdentityGuard: Auth provider updated for " + name + ": " + databaseManager.getAuthProvider(name) + " -> " + authProvider);
             }
+            LOGGER.info("IdentityGuard: Identity verified: " + name + " -> " + storedUuid + " (using stored UUID)");
+            return true;
+        }
+    }
+    
+    /**
+     * 获取或创建玩家身份（UUID接管核心方法）
+     * 
+     * @param name 玩家名称
+     * @param incomingUuid 传入的 UUID
+     * @param authProvider 认证提供者名称
+     * @return 固定的 UUID
+     */
+    public UUID getOrCreateIdentity(String name, UUID incomingUuid, String authProvider) {
+        if (name == null || incomingUuid == null || authProvider == null) {
+            LOGGER.warning("IdentityGuard: Name, UUID, or authProvider is null");
+            return null;
+        }
+        
+        UUID storedUuid = databaseManager.getUUID(name);
+        
+        if (storedUuid == null) {
+            // 第一次登录，使用传入的UUID
+            boolean stored = databaseManager.storeIdentity(name, incomingUuid, authProvider);
+            if (stored) {
+                LOGGER.info("IdentityGuard: Created new identity: " + name + " -> " + incomingUuid + " (" + authProvider + ")");
+                return incomingUuid;
+            } else {
+                LOGGER.warning("IdentityGuard: Failed to create identity: " + name);
+                return null;
+            }
+        } else {
+            // 老玩家，更新认证方式，返回存储的UUID
+            boolean updated = databaseManager.updateAuthProvider(name, storedUuid, authProvider);
+            if (updated) {
+                LOGGER.info("IdentityGuard: Updated auth provider for " + name + " to " + authProvider + " (keeping UUID: " + storedUuid + ")");
+            }
+            return storedUuid;
         }
     }
 
@@ -83,6 +108,57 @@ public class IdentityGuard {
      */
     public String getAuthProvider(String name) {
         return databaseManager.getAuthProvider(name);
+    }
+
+    /**
+     * 获取玩家的UUID
+     * 
+     * @param name 玩家名称
+     * @return 玩家UUID，若不存在返回 null
+     */
+    public UUID getUUID(String name) {
+        return databaseManager.getUUID(name);
+    }
+
+    /**
+     * 更新玩家的认证提供者
+     * 
+     * @param name 玩家名称
+     * @param uuid 玩家UUID
+     * @param authProvider 新的认证提供者名称
+     * @return 是否更新成功
+     */
+    public boolean updateAuthProvider(String name, UUID uuid, String authProvider) {
+        if (name == null || authProvider == null) {
+            LOGGER.warning("IdentityGuard: Name or authProvider is null");
+            return false;
+        }
+        
+        // 检查玩家是否存在
+        UUID storedUuid = databaseManager.getUUID(name);
+        if (storedUuid != null) {
+            // 玩家已存在，使用存储的UUID，只更新认证方式
+            boolean updated = databaseManager.updateAuthProvider(name, storedUuid, authProvider);
+            if (updated) {
+                LOGGER.info("IdentityGuard: Auth provider updated for " + name + " to " + authProvider);
+            } else {
+                LOGGER.warning("IdentityGuard: Failed to update auth provider for " + name);
+            }
+            return updated;
+        } else if (uuid != null) {
+            // 玩家不存在但提供了UUID，存储新身份
+            boolean stored = databaseManager.storeIdentity(name, uuid, authProvider);
+            if (stored) {
+                LOGGER.info("IdentityGuard: New identity registered: " + name + " -> " + uuid + " (" + authProvider + ")");
+            } else {
+                LOGGER.warning("IdentityGuard: Failed to store new identity: " + name + " -> " + uuid + " (" + authProvider + ")");
+            }
+            return stored;
+        } else {
+            // 玩家不存在且没有提供UUID
+            LOGGER.warning("IdentityGuard: Player not found and no UUID provided for " + name);
+            return false;
+        }
     }
 
     /**

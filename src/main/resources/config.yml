@@ -4,8 +4,8 @@ pipeline:
   - type: MOJANG
     enabled: true
   - type: YGGDRASIL
-    name: "LittleSkin"
-    api: "https://littleskin.cn/api/yggdrasil"
+    name: "HairuoSKY"
+    api: "https://skin.hairuosky.cn/api/yggdrasil"
     enabled: true
 
 # 数据库配置
@@ -19,3 +19,7 @@ database:
     database: "ximultilogin"
     username: "root"
     password: "password"
+
+# 盗版玩家设置
+# 是否允许未通过任何认证的玩家加入（默认为 false）
+allow_cracked: false

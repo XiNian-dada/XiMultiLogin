@@ -156,7 +156,7 @@ public class MojangAuthProvider implements AuthProvider {
      */
     @Override
     public String getName() {
-        return "Mojang";
+        return "MOJANG";
     }
 
     /**

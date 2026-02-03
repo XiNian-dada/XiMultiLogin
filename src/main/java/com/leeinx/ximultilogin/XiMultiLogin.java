@@ -2,13 +2,17 @@ package com.Leeinx.ximultilogin;
 
 import com.Leeinx.ximultilogin.auth.XiSessionService;
 import com.Leeinx.ximultilogin.config.ConfigManager;
+import com.Leeinx.ximultilogin.config.MessageManager;
 import com.Leeinx.ximultilogin.guard.IdentityGuard;
+import com.Leeinx.ximultilogin.command.XiCommandExecutor;
+import com.Leeinx.ximultilogin.command.XiTabCompleter;
 import com.Leeinx.ximultilogin.injector.XiInjector;
 import com.Leeinx.ximultilogin.reflection.XiReflection;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.lang.reflect.Method;
 import java.util.logging.Logger;
 
 /**
@@ -19,6 +23,7 @@ public class XiMultiLogin extends JavaPlugin {
 
     private static final Logger LOGGER = Bukkit.getLogger();
     private ConfigManager configManager;
+    private MessageManager messageManager;
     private IdentityGuard identityGuard;
     private XiInjector xiInjector;
     private Object originalSessionService;
@@ -41,6 +46,9 @@ public class XiMultiLogin extends JavaPlugin {
             }
         }
         configManager = new ConfigManager(this);
+        
+        // 初始化消息管理器
+        messageManager = new MessageManager(this);
         
         // 初始化身份守护者
         identityGuard = new IdentityGuard(configManager);
@@ -89,7 +97,40 @@ public class XiMultiLogin extends JavaPlugin {
             return;
         }
         
+        // 注册命令执行器
+        XiCommandExecutor commandExecutor = new XiCommandExecutor(this);
+        getCommand("ximultilogin").setExecutor(commandExecutor);
+        
+        // 注册标签补全器
+        XiTabCompleter tabCompleter = new XiTabCompleter(this);
+        getCommand("ximultilogin").setTabCompleter(tabCompleter);
+        LOGGER.info("XiMultiLogin: Command executor and tab completer registered");
+        
+        // 注册 PAPI 扩展
+        registerPlaceholderExpansion();
+        
         LOGGER.info("XiMultiLogin: Plugin enabled successfully");
+    }
+    
+    /**
+     * 注册 PAPI 占位符扩展
+     */
+    private void registerPlaceholderExpansion() {
+        try {
+            // 检查 PAPI 是否存在
+            if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+                // 使用反射注册扩展，避免编译时依赖
+                Class<?> expansionClass = Class.forName("com.Leeinx.ximultilogin.papi.XiPlaceholderExpansion");
+                Object expansion = expansionClass.getConstructor(XiMultiLogin.class).newInstance(this);
+                Method registerMethod = expansionClass.getMethod("register");
+                registerMethod.invoke(expansion);
+                LOGGER.info("XiMultiLogin: PlaceholderAPI expansion registered");
+            } else {
+                LOGGER.info("XiMultiLogin: PlaceholderAPI not found, skipping expansion registration");
+            }
+        } catch (Exception e) {
+            LOGGER.warning("XiMultiLogin: Failed to register PlaceholderAPI expansion: " + e.getMessage());
+        }
     }
 
     /**
@@ -165,5 +206,14 @@ public class XiMultiLogin extends JavaPlugin {
      */
     public XiSessionService getXiSessionService() {
         return xiSessionService;
+    }
+    
+    /**
+     * 获取消息管理器
+     * 
+     * @return 消息管理器实例
+     */
+    public MessageManager getMessageManager() {
+        return messageManager;
     }
 }

@@ -71,6 +71,22 @@ public class XiMultiLogin extends JavaPlugin {
     public void onEnable() {
         LOGGER.info("XiMultiLogin: Enabling plugin...");
         
+        // 检测服务端Online Mode状态
+        boolean onlineMode = getServer().getOnlineMode();
+        if (!onlineMode) {
+            LOGGER.severe("XiMultiLogin: Server is not in online mode! Plugin requires online mode to function properly.");
+            LOGGER.severe("XiMultiLogin: Disabling plugin...");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+        LOGGER.info("XiMultiLogin: Server is in online mode, proceeding with startup");
+        
+        // 检测调试模式
+        boolean debugMode = configManager.isDebug();
+        if (debugMode) {
+            LOGGER.info("XiMultiLogin: Debug mode enabled - verbose logging will be used");
+        }
+        
         // 注册登录监听器
         loginListener = new PlayerLoginListener(this);
         getServer().getPluginManager().registerEvents(loginListener, this);
@@ -126,11 +142,9 @@ public class XiMultiLogin extends JavaPlugin {
         try {
             // 检查 PAPI 是否存在
             if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
-                // 使用反射注册扩展，避免编译时依赖
-                Class<?> expansionClass = Class.forName("com.Leeinx.ximultilogin.papi.XiPlaceholderExpansion");
-                Object expansion = expansionClass.getConstructor(XiMultiLogin.class).newInstance(this);
-                Method registerMethod = expansionClass.getMethod("register");
-                registerMethod.invoke(expansion);
+                // 直接创建并注册扩展
+                com.Leeinx.ximultilogin.papi.XiPlaceholderExpansion expansion = new com.Leeinx.ximultilogin.papi.XiPlaceholderExpansion(this);
+                expansion.register();
                 LOGGER.info("XiMultiLogin: PlaceholderAPI expansion registered");
             } else {
                 LOGGER.info("XiMultiLogin: PlaceholderAPI not found, skipping expansion registration");

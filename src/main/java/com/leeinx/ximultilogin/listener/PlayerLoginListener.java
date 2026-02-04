@@ -42,15 +42,16 @@ public class PlayerLoginListener implements Listener {
      *
      * @param event 异步玩家预登录事件
      */
-    @EventHandler
+    @EventHandler(priority = org.bukkit.event.EventPriority.HIGHEST)
     public void onAsyncPlayerPreLogin(AsyncPlayerPreLoginEvent event) {
         String username = event.getName();
         UUID uuid = event.getUniqueId();
 
         LOGGER.info("PlayerLoginListener: AsyncPlayerPreLoginEvent for " + username);
 
-        String reason = failedAuthReasons.remove(username);
-        String provider = failedAuthProviders.remove(username);
+        // 无条件检查是否有失败记录
+        String reason = failedAuthReasons.get(username);
+        String provider = failedAuthProviders.get(username);
 
         if (reason != null) {
             LOGGER.info("PlayerLoginListener: Found failed auth reason for " + username + ": " + reason);
@@ -70,44 +71,69 @@ public class PlayerLoginListener implements Listener {
 
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, kickMessage);
             LOGGER.info("PlayerLoginListener: Kicked player " + username + " with custom message");
+            
+            // 在disallow之后再移除记录
+            failedAuthReasons.remove(username);
+            failedAuthProviders.remove(username);
         }
     }
 
     /**
      * 监听玩家登录事件
-     * 作为备用方案，处理在 AsyncPlayerPreLoginEvent 中未处理的认证失败
+     * 作为安全网，处理在 AsyncPlayerPreLoginEvent 中未处理的认证失败
      *
      * @param event 玩家登录事件
      */
-    @EventHandler
+    @EventHandler(priority = org.bukkit.event.EventPriority.HIGHEST)
     public void onPlayerLogin(PlayerLoginEvent event) {
         String username = event.getPlayer().getName();
 
         LOGGER.info("PlayerLoginListener: PlayerLoginEvent for " + username);
 
-        if (event.getResult() == PlayerLoginEvent.Result.KICK_OTHER) {
-            String reason = failedAuthReasons.remove(username);
-            String provider = failedAuthProviders.remove(username);
+        // 检查是否有失败记录（安全网）
+        String reason = failedAuthReasons.get(username);
+        String provider = failedAuthProviders.get(username);
 
-            if (reason != null) {
-                LOGGER.info("PlayerLoginListener: Found failed auth reason for " + username + ": " + reason);
+        if (reason != null) {
+            // 严重安全警告：玩家绕过了异步检查
+            LOGGER.severe("PlayerLoginListener: CRITICAL SECURITY BREACH - Player " + username + " bypassed AsyncPlayerPreLoginEvent check!");
+            LOGGER.severe("PlayerLoginListener: Authentication failure reason: " + reason);
 
-                String kickMessage;
-                if ("strict_auth_failed".equals(reason)) {
-                    kickMessage = messageManager.getMessage("login.strict_auth_failed", "provider", provider);
-                } else if ("mojang_failed".equals(reason)) {
-                    kickMessage = messageManager.getMessage("login.mojang_failed");
-                } else if ("yggdrasil_failed".equals(reason)) {
-                    kickMessage = messageManager.getMessage("login.yggdrasil_failed", "provider", provider);
-                } else if ("all_providers_failed".equals(reason)) {
-                    kickMessage = messageManager.getMessage("login.all_providers_failed");
-                } else {
-                    kickMessage = messageManager.getMessage("login.failed", "reason", reason);
-                }
-
-                event.disallow(PlayerLoginEvent.Result.KICK_OTHER, kickMessage);
-                LOGGER.info("PlayerLoginListener: Kicked player " + username + " with custom message");
+            String kickMessage;
+            if ("strict_auth_failed".equals(reason)) {
+                kickMessage = messageManager.getMessage("login.strict_auth_failed", "provider", provider);
+            } else if ("mojang_failed".equals(reason)) {
+                kickMessage = messageManager.getMessage("login.mojang_failed");
+            } else if ("yggdrasil_failed".equals(reason)) {
+                kickMessage = messageManager.getMessage("login.yggdrasil_failed", "provider", provider);
+            } else if ("all_providers_failed".equals(reason)) {
+                kickMessage = messageManager.getMessage("login.all_providers_failed");
+            } else {
+                kickMessage = messageManager.getMessage("login.failed", "reason", reason);
             }
+
+            event.disallow(PlayerLoginEvent.Result.KICK_OTHER, kickMessage);
+            LOGGER.info("PlayerLoginListener: Kicked player " + username + " with custom message (safety net)");
+            
+            // 清理记录
+            failedAuthReasons.remove(username);
+            failedAuthProviders.remove(username);
+        }
+    }
+
+    /**
+     * 监听玩家退出事件
+     * 确保失败记录被清理
+     *
+     * @param event 玩家退出事件
+     */
+    @EventHandler
+    public void onPlayerQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        String username = event.getPlayer().getName();
+        
+        // 清理失败记录
+        if (failedAuthReasons.remove(username) != null || failedAuthProviders.remove(username) != null) {
+            LOGGER.info("PlayerLoginListener: Cleaned up auth failure records for " + username + " on quit");
         }
     }
 
@@ -136,5 +162,17 @@ public class PlayerLoginListener implements Listener {
         failedAuthReasons.clear();
         failedAuthProviders.clear();
         LOGGER.info("PlayerLoginListener: Cleaned up old auth failure records");
+    }
+    
+    /**
+     * 清除指定玩家的认证失败记录
+     * 在验证成功时调用，防止玩家被错误踢出
+     * 
+     * @param username 玩家名称
+     */
+    public void clearAuthFailure(String username) {
+        if (failedAuthReasons.remove(username) != null || failedAuthProviders.remove(username) != null) {
+            LOGGER.info("PlayerLoginListener: Cleared auth failure record for " + username);
+        }
     }
 }

@@ -2,21 +2,17 @@ package com.Leeinx.ximultilogin.papi;
 
 import com.Leeinx.ximultilogin.XiMultiLogin;
 import com.Leeinx.ximultilogin.guard.IdentityGuard;
-import org.bukkit.Bukkit;
+import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
-import org.bukkit.entity.Player;
 
 import java.util.UUID;
-import java.util.logging.Logger;
 
 /**
  * XiMultiLogin 占位符扩展
  * 为 PAPI 提供变量支持
- * 使用反射实现，避免编译时依赖
  */
-public class XiPlaceholderExpansion {
+public class XiPlaceholderExpansion extends PlaceholderExpansion {
 
-    private static final Logger LOGGER = Bukkit.getLogger();
     private final XiMultiLogin plugin;
     private final IdentityGuard identityGuard;
 
@@ -30,46 +26,27 @@ public class XiPlaceholderExpansion {
         this.identityGuard = plugin.getIdentityGuard();
     }
 
-    /**
-     * 注册扩展
-     */
-    public void register() {
-        try {
-            // 使用反射注册扩展
-            Class<?> expansionClass = getClass();
-            Object expansion = this;
-            
-            // 获取 PlaceholderAPI 主类
-            Class<?> papiClass = Class.forName("me.clip.placeholderapi.PlaceholderAPI");
-            
-            // 获取注册方法
-            java.lang.reflect.Method registerMethod = papiClass.getMethod("registerExpansion", Class.forName("me.clip.placeholderapi.expansion.PlaceholderExpansion"));
-            
-            // 调用注册方法
-            registerMethod.invoke(null, expansion);
-            LOGGER.info("XiMultiLogin: PlaceholderAPI expansion registered");
-        } catch (Exception e) {
-            LOGGER.warning("XiMultiLogin: Failed to register PlaceholderAPI expansion: " + e.getMessage());
-        }
-    }
-
-    // 以下方法使用反射调用，避免编译时依赖
+    @Override
     public String getIdentifier() {
         return "ximultilogin";
     }
 
+    @Override
     public String getAuthor() {
         return "XiLogin Team";
     }
 
+    @Override
     public String getVersion() {
-        return "1.0";
+        return plugin.getDescription().getVersion();
     }
 
+    @Override
     public boolean persist() {
         return true; // 持久化，避免重载时丢失
     }
 
+    @Override
     public String onRequest(OfflinePlayer player, String params) {
         if (player == null) {
             return "";

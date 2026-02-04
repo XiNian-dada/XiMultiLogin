@@ -23,3 +23,8 @@ database:
 # 盗版玩家设置
 # 是否允许未通过任何认证的玩家加入（默认为 false）
 allow_cracked: false
+
+# 调试设置
+# 是否开启调试模式（默认为 false）
+# 开启后会显示详细的日志信息，包括认证过程和错误详情
+debug: false

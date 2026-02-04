@@ -13,25 +13,66 @@ import java.util.List;
 import java.util.logging.Logger;
 
 /**
- * 配置管理器
- * 负责加载和管理插件配置
- */
-public class ConfigManager {
-
-    private static final Logger LOGGER = Bukkit.getLogger();
-    private final JavaPlugin plugin;
-    private File configFile;
-    private FileConfiguration config;
-
-    /**
-     * 构造 ConfigManager
-     * 
-     * @param plugin 插件实例
+     * 配置管理器
+     * 负责加载和管理插件配置
      */
-    public ConfigManager(JavaPlugin plugin) {
-        this.plugin = plugin;
-        loadConfig();
-    }
+    public class ConfigManager {
+
+        private static final Logger LOGGER = Bukkit.getLogger();
+        private final JavaPlugin plugin;
+        private File configFile;
+        private FileConfiguration config;
+        private boolean debugMode;
+        
+        /**
+         * 构造 ConfigManager
+         * 
+         * @param plugin 插件实例
+         */
+        public ConfigManager(JavaPlugin plugin) {
+            this.plugin = plugin;
+            loadConfig();
+            this.debugMode = config.getBoolean("debug", false);
+        }
+        
+        /**
+         * 记录信息日志
+         * 
+         * @param message 日志消息
+         */
+        private void info(String message) {
+            LOGGER.info("XiMultiLogin: " + message);
+        }
+        
+        /**
+         * 记录调试日志
+         * 只在DEBUG模式下显示
+         * 
+         * @param message 日志消息
+         */
+        private void debug(String message) {
+            if (debugMode) {
+                LOGGER.info("XiMultiLogin [DEBUG]: " + message);
+            }
+        }
+        
+        /**
+         * 记录警告日志
+         * 
+         * @param message 日志消息
+         */
+        private void warning(String message) {
+            LOGGER.warning("XiMultiLogin: " + message);
+        }
+        
+        /**
+         * 记录严重错误日志
+         * 
+         * @param message 日志消息
+         */
+        private void severe(String message) {
+            LOGGER.severe("XiMultiLogin: " + message);
+        }
 
     /**
      * 加载配置
@@ -40,10 +81,11 @@ public class ConfigManager {
         configFile = new File(plugin.getDataFolder(), "config.yml");
         if (!configFile.exists()) {
             plugin.saveResource("config.yml", false);
-            LOGGER.info("XiMultiLogin: Created default config.yml");
+            info("Created default config.yml");
         }
         config = YamlConfiguration.loadConfiguration(configFile);
-        LOGGER.info("XiMultiLogin: Config loaded successfully");
+        this.debugMode = config.getBoolean("debug", false);
+        info("Config loaded successfully");
     }
 
     /**
@@ -52,9 +94,9 @@ public class ConfigManager {
     public void saveConfig() {
         try {
             config.save(configFile);
-            LOGGER.info("XiMultiLogin: Config saved successfully");
+            info("Config saved successfully");
         } catch (IOException e) {
-            LOGGER.severe("XiMultiLogin: Failed to save config: " + e.getMessage());
+            severe("Failed to save config: " + e.getMessage());
         }
     }
 
@@ -76,15 +118,15 @@ public class ConfigManager {
     public List<ProviderConfig> getPipelineConfig() {
         List<ProviderConfig> providers = new ArrayList<>();
         
-        LOGGER.info("XiMultiLogin: Loading pipeline configuration...");
+        info("Loading pipeline configuration...");
         
         // 1. 尝试将 pipeline 作为列表读取（优先）
         List<?> pipelineList = config.getList("pipeline");
-        LOGGER.info("XiMultiLogin: Pipeline list: " + (pipelineList != null ? pipelineList.size() + " items" : "null"));
+        debug("Pipeline list: " + (pipelineList != null ? pipelineList.size() + " items" : "null"));
         if (pipelineList != null && !pipelineList.isEmpty()) {
-            LOGGER.info("XiMultiLogin: Loading pipeline as list format");
+            info("Loading pipeline as list format");
             for (Object item : pipelineList) {
-                LOGGER.info("XiMultiLogin: Processing item: " + item.getClass().getName() + " = " + item);
+                debug("Processing item: " + item.getClass().getName() + " = " + item);
                 
                 // 处理不同类型的列表项
                 ConfigurationSection providerSection = null;
@@ -98,45 +140,45 @@ public class ConfigManager {
                         memoryConfig.set(entry.getKey().toString(), entry.getValue());
                     }
                     providerSection = memoryConfig;
-                    LOGGER.info("XiMultiLogin: Converted Map to ConfigurationSection");
+                    debug("Converted Map to ConfigurationSection");
                 }
                 
                 if (providerSection != null) {
                     ProviderConfig providerConfig = parseProviderConfig(providerSection);
                     if (providerConfig != null) {
                         providers.add(providerConfig);
-                        LOGGER.info("XiMultiLogin: Successfully added provider: " + providerConfig.getName());
+                        debug("Successfully added provider: " + providerConfig.getName());
                     } else {
-                        LOGGER.warning("XiMultiLogin: Failed to parse provider config");
+                        warning("Failed to parse provider config");
                     }
                 } else {
-                    LOGGER.warning("XiMultiLogin: Item is not a ConfigurationSection or Map: " + item.getClass().getName());
+                    warning("Item is not a ConfigurationSection or Map: " + item.getClass().getName());
                 }
             }
         } else {
             // 2. 尝试将 pipeline 作为映射读取（向后兼容）
             ConfigurationSection pipelineSection = config.getConfigurationSection("pipeline");
-            LOGGER.info("XiMultiLogin: Pipeline section: " + (pipelineSection != null ? "found" : "null"));
+            debug("Pipeline section: " + (pipelineSection != null ? "found" : "null"));
             if (pipelineSection != null) {
-                LOGGER.info("XiMultiLogin: Loading pipeline as map format");
+                info("Loading pipeline as map format");
                 for (String key : pipelineSection.getKeys(false)) {
-                    LOGGER.info("XiMultiLogin: Processing key: " + key);
+                    debug("Processing key: " + key);
                     ConfigurationSection providerSection = pipelineSection.getConfigurationSection(key);
                     if (providerSection != null) {
                         ProviderConfig providerConfig = parseProviderConfig(providerSection);
                         if (providerConfig != null) {
                             providers.add(providerConfig);
-                            LOGGER.info("XiMultiLogin: Successfully added provider: " + providerConfig.getName());
+                            debug("Successfully added provider: " + providerConfig.getName());
                         } else {
-                            LOGGER.warning("XiMultiLogin: Failed to parse provider config for key: " + key);
+                            warning("Failed to parse provider config for key: " + key);
                         }
                     } else {
-                        LOGGER.warning("XiMultiLogin: Provider section is null for key: " + key);
+                        warning("Provider section is null for key: " + key);
                     }
                 }
             } else {
                 // 3. 使用默认配置
-                LOGGER.warning("XiMultiLogin: No pipeline configuration found, using default");
+                warning("No pipeline configuration found, using default");
                 ProviderConfig mojangConfig = new ProviderConfig();
                 mojangConfig.setType("MOJANG");
                 mojangConfig.setEnabled(true);
@@ -146,11 +188,11 @@ public class ConfigManager {
         }
         
         // 打印加载的提供者
-        LOGGER.info("XiMultiLogin: Loaded " + providers.size() + " providers:");
+        info("Loaded " + providers.size() + " providers:");
         for (ProviderConfig config : providers) {
-            LOGGER.info("  - " + config.getName() + " (" + config.getType() + "): " + (config.isEnabled() ? "enabled" : "disabled"));
+            info("  - " + config.getName() + " (" + config.getType() + "): " + (config.isEnabled() ? "enabled" : "disabled"));
             if ("YGGDRASIL".equalsIgnoreCase(config.getType())) {
-                LOGGER.info("    API URL: " + config.getApiUrl());
+                debug("    API URL: " + config.getApiUrl());
             }
         }
         
@@ -165,30 +207,30 @@ public class ConfigManager {
      */
     private ProviderConfig parseProviderConfig(ConfigurationSection section) {
         try {
-            LOGGER.info("XiMultiLogin: Parsing provider config section: " + section.getName());
-            LOGGER.info("XiMultiLogin: Section keys: " + section.getKeys(false));
+            debug("Parsing provider config section: " + section.getName());
+            debug("Section keys: " + section.getKeys(false));
             
             ProviderConfig providerConfig = new ProviderConfig();
             providerConfig.setType(section.getString("type", "MOJANG"));
             providerConfig.setEnabled(section.getBoolean("enabled", true));
             
-            LOGGER.info("XiMultiLogin: Provider type: " + providerConfig.getType() + ", enabled: " + providerConfig.isEnabled());
+            debug("Provider type: " + providerConfig.getType() + ", enabled: " + providerConfig.isEnabled());
             
             if ("YGGDRASIL".equalsIgnoreCase(providerConfig.getType())) {
                 // 处理 YGGDRASIL 类型的配置
                 providerConfig.setName(section.getString("name", "Yggdrasil"));
                 // 支持 api 和 apiUrl 两种配置键名
                 String apiUrl = section.getString("api");
-                LOGGER.info("XiMultiLogin: Raw API URL from 'api' key: " + apiUrl);
+                debug("Raw API URL from 'api' key: " + apiUrl);
                 if (apiUrl == null) {
                     apiUrl = section.getString("apiUrl", "https://authserver.mojang.com");
-                    LOGGER.info("XiMultiLogin: API URL from 'apiUrl' key: " + apiUrl);
+                    debug("API URL from 'apiUrl' key: " + apiUrl);
                 } else {
                     // 处理 apiUrl，去除首尾的空格和引号
                     apiUrl = apiUrl.trim();
                     // 去除所有可能的引号和反引号
                     apiUrl = apiUrl.replaceAll("[`\"']", "");
-                    LOGGER.info("XiMultiLogin: Processed API URL: " + apiUrl);
+                    debug("Processed API URL: " + apiUrl);
                 }
                 providerConfig.setApiUrl(apiUrl);
             } else {
@@ -196,11 +238,13 @@ public class ConfigManager {
                 providerConfig.setName(section.getString("name", "Mojang"));
             }
             
-            LOGGER.info("XiMultiLogin: Successfully parsed provider: " + providerConfig.getName());
+            debug("Successfully parsed provider: " + providerConfig.getName());
             return providerConfig;
         } catch (Exception e) {
-            LOGGER.warning("XiMultiLogin: Failed to parse provider config: " + e.getMessage());
-            e.printStackTrace();
+            warning("Failed to parse provider config: " + e.getMessage());
+            if (debugMode) {
+                e.printStackTrace();
+            }
             return null;
         }
     }
@@ -226,7 +270,7 @@ public class ConfigManager {
         } else {
             // 默认使用 SQLite
             databaseConfig.setType("SQLite");
-            LOGGER.info("XiMultiLogin: Using default database config");
+            info("Using default database config");
         }
         return databaseConfig;
     }
@@ -248,7 +292,28 @@ public class ConfigManager {
     public void setAllowCracked(boolean allowCracked) {
         config.set("allow_cracked", allowCracked);
         saveConfig();
-        LOGGER.info("XiMultiLogin: Allow cracked set to " + allowCracked);
+        info("Allow cracked set to " + allowCracked);
+    }
+    
+    /**
+     * 获取是否开启调试模式
+     * 
+     * @return 是否开启调试模式
+     */
+    public boolean isDebug() {
+        return config.getBoolean("debug", false);
+    }
+    
+    /**
+     * 设置是否开启调试模式
+     * 
+     * @param debug 是否开启调试模式
+     */
+    public void setDebug(boolean debug) {
+        config.set("debug", debug);
+        saveConfig();
+        info("Debug mode set to " + debug);
+        this.debugMode = debug;
     }
 
     /**

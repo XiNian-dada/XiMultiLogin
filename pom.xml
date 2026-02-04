@@ -6,7 +6,7 @@
 
     <groupId>cn.xiologin</groupId>
     <artifactId>XiMultiLogin</artifactId>
-    <version>2.0</version>
+    <version>2.1</version>
     <packaging>jar</packaging>
 
     <name>XiMultiLogin</name>
@@ -28,6 +28,10 @@
             <id>maven-central</id>
             <url>https://repo1.maven.org/maven2/</url>
         </repository>
+        <repository>
+            <id>placeholderapi</id>
+            <url>https://repo.helpch.at/releases/</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -36,6 +40,14 @@
             <groupId>org.spigotmc</groupId>
             <artifactId>spigot-api</artifactId>
             <version>1.16.5-R0.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        
+        <!-- PlaceholderAPI (soft dependency) -->
+        <dependency>
+            <groupId>me.clip</groupId>
+            <artifactId>placeholderapi</artifactId>
+            <version>2.12.1</version>
             <scope>provided</scope>
         </dependency>
 
@@ -71,6 +83,8 @@
             <version>3.12.4</version>
             <scope>test</scope>
         </dependency>
+        
+
 
     </dependencies>
 

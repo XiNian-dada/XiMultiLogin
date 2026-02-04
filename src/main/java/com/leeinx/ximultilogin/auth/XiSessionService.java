@@ -130,20 +130,27 @@ public class XiSessionService {
                 try {
                     Object profile = provider.authenticate(username, serverId);
                     if (profile != null) {
+                        // 验证成功，清理之前的失败记录
+                        if (loginListener != null) {
+                            // 清理失败记录
+                            loginListener.clearAuthFailure(username);
+                        }
+                        
                         // 验证成功，接管 UUID
                         LOGGER.info("XiSessionService: Strict auth successful via " + storedAuthProvider);
                         return takeOverUUID(profile, provider.getName());
                     } else {
-                        // 验证失败 -> 拒绝登录
+                        // 验证失败 -> 延迟拒绝（返回临时Profile）
                         LOGGER.warning("XiSessionService: Strict auth FAILED. Player locked to " + storedAuthProvider + " but verification failed.");
-                        LOGGER.warning("XiSessionService: Rejecting login to prevent identity theft.");
+                        LOGGER.warning("XiSessionService: Deferring rejection to show custom kick message.");
                         
                         // 记录认证失败原因，用于显示自定义消息
                         if (loginListener != null) {
                             loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
                         }
                         
-                        return null; // 直接返回 null，阻止后续流程
+                        // 返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
+                        return createTemporaryProfile(username);
                     }
                 } catch (Exception e) {
                     LOGGER.severe("XiSessionService: Provider error: " + e.getMessage());
@@ -153,7 +160,8 @@ public class XiSessionService {
                         loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
                     }
                     
-                    return null;
+                    // 返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
+                    return createTemporaryProfile(username);
                 }
             } else {
                 // 如果锁定的 Provider 被删了或者改名了
@@ -171,6 +179,11 @@ public class XiSessionService {
             try {
                 Object profile = provider.authenticate(username, serverId);
                 if (profile != null) {
+                    // 验证成功，清理之前的失败记录
+                    if (loginListener != null) {
+                        loginListener.clearAuthFailure(username);
+                    }
+                    
                     LOGGER.info("XiSessionService: First-time auth successful via " + provider.getName());
                     return takeOverUUID(profile, provider.getName());
                 }
@@ -201,7 +214,9 @@ public class XiSessionService {
             }
         }
         
-        return null;
+        // 所有认证方式都失败，返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
+        LOGGER.info("XiSessionService: Deferring rejection for all providers failed case.");
+        return createTemporaryProfile(username);
     }
     
     /**
@@ -215,8 +230,13 @@ public class XiSessionService {
             // 使用反射创建临时GameProfile
             Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
             
-            // 为盗版玩家生成基于用户名的UUID
-            java.util.UUID uuid = java.util.UUID.nameUUIDFromBytes("OfflinePlayer:".concat(username).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // 尝试获取真实UUID（如果存在）
+            java.util.UUID uuid = identityGuard.getUUID(username);
+            
+            // 如果没有真实UUID，使用基于用户名的UUID
+            if (uuid == null) {
+                uuid = java.util.UUID.nameUUIDFromBytes("OfflinePlayer:".concat(username).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
             
             // 创建GameProfile实例
             java.lang.reflect.Constructor<?> constructor = gameProfileClass.getConstructor(java.util.UUID.class, String.class);

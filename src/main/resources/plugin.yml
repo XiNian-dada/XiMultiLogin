@@ -4,6 +4,8 @@ version: ${project.version}
 author: XiLogin Team
 description: A Minecraft plugin that supports multiple authentication methods
 api-version: 1.16
+softdepend:
+  - PlaceholderAPI
 
 commands:
   ximultilogin:

@@ -1,5 +1,12 @@
 # XiMultiLogin
 
+## 语言 / Language
+
+- [中文 (简体)](#中文)
+- [English](#english)
+
+## 中文
+
 XiMultiLogin 是一个为 Minecraft Bukkit/Spigot/Paper 服务器设计的多认证方式支持插件，旨在解决 MultiLogin 取消对 Bukkit 平台支持后，社区缺乏替代方案的问题。
 
 ## 背景
@@ -633,10 +640,663 @@ pipeline:
 
 ## 联系方式
 
-- **作者**：XiLogin Team
-- **项目地址**：https://github.com/yourusername/XiMultiLogin
-- **问题反馈**：https://github.com/yourusername/XiMultiLogin/issues
+- **作者** XiNian-dada
+- **项目地址**：https://github.com/XiNian-dada/XiMultiLogin
+- **问题反馈**：https://github.com/XiNian-dada/XiMultiLogin/issues
 
 ---
 
 **享受使用 XiMultiLogin！** 🎉
+
+## English
+
+XiMultiLogin is a multi-authentication plugin designed for Minecraft Bukkit/Spigot/Paper servers. It aims to solve the problem of the community lacking alternatives after MultiLogin discontinued support for the Bukkit platform.
+
+## Background
+
+### Why do we need XiMultiLogin?
+
+MultiLogin is an excellent Minecraft multi-authentication plugin, but due to the development team's decision to stop supporting the Bukkit platform, many servers using Bukkit/Spigot/Paper lost the opportunity to use MultiLogin. XiMultiLogin emerged to fill this gap.
+
+### Design Goals
+
+- **High Performance**: Optimized authentication process, minimizing impact on server performance
+- **High Configurability**: Flexible configuration system to meet different server needs
+- **Multi-Authentication Support**: Support for Mojang official authentication and multiple Yggdrasil protocol authentications
+- **Security and Reliability**: Strict identity locking mechanism to prevent identity theft
+- **Easy to Use**: Simple configuration and command system to lower the usage threshold
+
+## Core Features
+
+### Multi-Authentication Support
+- **Mojang Official Authentication**: Standard Minecraft account login
+- **Yggdrasil Protocol Authentication**: Support for third-party skin sites like LittleSkin
+- **Extensible Architecture**: Easy to add new authentication providers
+
+### Security Features
+- **Identity Locking Mechanism**: Prevent security issues of "same name different UUID"
+- **Strict Authentication Mode**: Once a player logs in using a certain authentication method, subsequent logins must use the same method
+- **UUID Takeover System**: Ensure UUID consistency when players switch between different authentication methods
+- **Database Persistence**: Player identity information is not lost after server restart
+
+### Management Features
+- **Command System**: Complete management commands, support setting and querying player authentication methods
+- **PAPI Variable Support**: Integration with PlaceholderAPI, displaying player authentication status
+- **Message Configuration System**: Customizable all prompt messages
+- **Cracked Player Support**: Optional whether to allow players who fail authentication to join
+
+### Technical Features
+- **Multi-Version Compatibility**: Support Minecraft 1.16.5 - 1.21+, specially optimized for 1.20.2+ (stability pending testing)
+- **Dynamic Proxy Mechanism**: Solve ClassLoader isolation issues
+- **Record Reconstruction Support**: Handle immutability of Java Record
+- **Reflection Tools**: Cross-version reflection operations, adapt to different NMS class structures
+- **Database Support**: SQLite (default) and MySQL, using HikariCP connection pool
+
+## Working Principle
+
+### Technical Architecture
+
+XiMultiLogin implements multi-authentication support through the following core components:
+
+#### 1. Injection Mechanism (XiInjector)
+
+When the plugin starts, it injects the custom `XiSessionService` into the Minecraft server's verification process through reflection:
+
+```
+Server startup → XiInjector initialization → Inject XiSessionService → Replace default SessionService
+```
+
+**Technical Challenges and Solutions**:
+
+- **ClassLoader Isolation**: Different class loaders for plugins and servers cause type mismatch when operating directly
+  - Solution: Use dynamic proxy to create cross-ClassLoader bridge objects
+
+- **Java Record Immutability**: 1.20.2+ versions use Record to store configuration, which cannot be directly modified
+  - Solution: Use reflection to read field values and rebuild Record objects
+
+- **Method Signature Changes**: Method signatures may differ between versions
+  - Solution: Use loose reflection matching and intelligent parameter adaptation
+
+#### 2. Authentication Process (XiSessionService)
+
+When a player attempts to join the server, the authentication process is as follows:
+
+```
+Player login → hasJoinedServer call → Check database → 
+  ├─ Has record → Only use specified authentication method → Success/Failure
+  └─ No record → Traverse all authentication methods → Record if successful → Reject if failed
+```
+
+**Strict Authentication Mode**:
+
+- If there is a player's authentication record in the database, only use the specified authentication method
+- If authentication fails, directly reject login, do not try other methods
+- This prevents identity theft: even if someone knows the password of another authentication method, they cannot log in
+
+**UUID Takeover System**:
+
+- When a player logs in using a new authentication method, the system checks if there is already a UUID record for that player
+- If there is, use the historical UUID to ensure player identity consistency
+- This solves the problem of data loss caused by UUID changes after switching authentication methods
+
+#### 3. Authentication Providers (AuthProvider)
+
+The plugin uses a provider pattern to support multiple authentication methods:
+
+- **MojangAuthProvider**: Call Mojang official authentication API
+- **YggdrasilAuthProvider**: Call Yggdrasil protocol API (supports LittleSkin, HairuoSKY, etc.)
+
+Each provider implements the `authenticate()` method, returning the player's GameProfile or null.
+
+#### 4. Identity Guard (IdentityGuard)
+
+`IdentityGuard` is responsible for managing player identity information:
+
+- Store the mapping relationship between player name, UUID and authentication method
+- Prevent security issues of "same name different UUID"
+- Provide UUID takeover functionality to ensure identity consistency
+
+#### 5. Database Management (DatabaseManager)
+
+Supports two databases:
+
+- **SQLite**: Default, automatically creates `ximultilogin.db` file, suitable for small servers
+- **MySQL**: Need manual configuration, suitable for large servers, provides better concurrency performance
+
+Use HikariCP connection pool to optimize database connections.
+
+### Data Flow Chart
+
+```
+Player login request
+    ↓
+XiSessionService.hasJoinedServer()
+    ↓
+Query database
+    ↓
+Has record?
+    ├─ Yes → Only use specified authentication method
+    │        ↓
+    │     Authentication successful?
+    │        ├─ Yes → UUID takeover → Return GameProfile
+    │        └─ No → Reject login
+    │
+    └─ No → Traverse all authentication methods
+             ↓
+          Authentication successful?
+             ├─ Yes → Record authentication method and UUID → Return GameProfile
+             └─ No → Allow cracked?
+                     ├─ Yes → Create temporary identity → Return GameProfile
+                     └─ No → Reject login
+```
+
+## Installation Method
+
+### System Requirements
+
+- **Java Version**: Java 8 or higher
+- **Server Type**: Bukkit/Spigot/Paper 1.16.5 - 1.21+
+- **Dependency Plugins**: PlaceholderAPI (optional, for PAPI variable support)
+
+### Installation Steps
+
+1. **Download the plugin**
+   - Download the latest version of `XiMultiLogin-x.x.jar` from GitHub Releases
+   - Or compile the project yourself (see Development Guide)
+
+2. **Install to server**
+   - Put the JAR file into the server's `plugins` directory
+   - Restart the server
+
+3. **First startup**
+   - The plugin will automatically create configuration files and database
+   - SQLite database is used by default, no additional configuration required
+   - Check the console log to ensure the plugin loads normally
+
+## Configuration Instructions
+
+After the plugin starts, it will generate the following files in the `plugins/XiMultiLogin` directory:
+
+- `config.yml`: Main configuration file
+- `messages.yml`: Message configuration file
+- `ximultilogin.db`: SQLite database file (if using SQLite)
+
+### Main Configuration File (config.yml)
+
+```yaml
+# XiMultiLogin configuration file
+# Authentication chain order: try from top to bottom
+pipeline:
+  # Mojang official authentication
+  - type: MOJANG
+    enabled: true
+  
+  # Yggdrasil protocol authentication (LittleSkin)
+  - type: YGGDRASIL
+    name: "LittleSkin"
+    api: "https://littleskin.cn/api/yggdrasil"
+    enabled: true
+  
+  # Yggdrasil protocol authentication (HairuoSKY)
+  - type: YGGDRASIL
+    name: "HairuoSKY"
+    api: "https://skin.hairuosky.cn/api/yggdrasil"
+    enabled: true
+
+# Database configuration
+database:
+  # Database type: SQLite (default) or MySQL
+  type: "SQLite"
+  
+  # MySQL configuration (only effective when type is MySQL)
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "ximultilogin"
+    username: "root"
+    password: "password"
+
+# Cracked player settings
+# Whether to allow players who fail any authentication to join (default: false)
+# Not recommended to enable, otherwise security issues may occur
+allow_cracked: false
+
+# Debug settings
+# Whether to enable debug mode (default: false)
+# When enabled, detailed log information will be displayed, including authentication process and error details
+debug: false
+```
+
+#### Configuration Item Details
+
+**Authentication Chain Configuration (pipeline)**
+
+- `type`: Authentication type, supports `MOJANG` or `YGGDRASIL`
+- `enabled`: Whether to enable this authentication method
+- `name`: Authentication provider name (only required for `YGGDRASIL` type, used to identify different Yggdrasil servers)
+- `api`: Yggdrasil API address (only required for `YGGDRASIL` type)
+
+**Database Configuration (database)**
+
+- `type`: Database type, optional `SQLite` or `MySQL`
+- `mysql`: MySQL database configuration (only effective when `type` is `MySQL`)
+  - `host`: MySQL server address
+  - `port`: MySQL port
+  - `database`: Database name
+  - `username`: Database username
+  - `password`: Database password
+
+**Cracked Player Settings (allow_cracked)**
+
+- `true`: Allow players who fail any authentication to join (create temporary identity)
+- `false`: Reject players who fail authentication (default)
+
+**Debug Settings (debug)**
+
+- `true`: Enable debug mode, display detailed log information
+- `false`: Disable debug mode, display only key information (default)
+
+### Message Configuration File (messages.yml)
+
+```yaml
+# XiMultiLogin message configuration file
+# Support color codes, such as &c, &a, etc.
+# Support variable replacement, such as {player}, {reason}, etc.
+
+login:
+  success: "&aLogin successful! Welcome back, {player}!"
+  failed: "&cLogin failed: {reason}"
+  name_taken: "&cLogin failed: This nickname has been used, please choose another nickname!"
+  auth_changed: "&aAuthentication method has been changed to {provider}!"
+  cracked: "&eLogin successful (cracked mode): Welcome, {player}!"
+
+error:
+  authentication: "&cAuthentication failed: Unable to verify your identity!"
+  no_permission: "&cInsufficient permissions: You do not have permission to perform this operation!"
+  invalid_args: "&cInvalid arguments: Please check the command arguments!"
+  player_not_found: "&cError: Player {player} not found!"
+  config_error: "&cConfiguration error: {reason}"
+  database: "&cDatabase error: {reason}"
+
+command:
+  success: "&aOperation successful!"
+  set_auth: "&aSuccessfully set player {player}'s authentication method to {auth}!"
+  get_auth: "&aPlayer {player}'s current authentication method: {auth}"
+  set_allow_cracked: "&aSuccessfully set allow cracked players to join: {value}"
+  get_allow_cracked: "&aCurrent setting for allowing cracked players to join: {value}"
+  reloaded: "&aConfiguration has been reloaded!"
+  messages_reloaded: "&aMessage configuration has been reloaded!"
+
+system:
+  enabled: "&aXiMultiLogin plugin has been enabled!"
+  disabled: "&cXiMultiLogin plugin has been disabled!"
+  messages_loaded: "&aMessage configuration loaded successfully!"
+  messages_reload: "&aMessage configuration has been reloaded!"
+
+other:
+  unknown_command: "&cUnknown command: Please use /ximultilogin help to view help!"
+  help: "&aUse /ximultilogin help to view command help!"
+  help_menu:
+    title: "&6===== XiMultiLogin Command Help ====="
+    setauth: "&a/ximultilogin setauth <player> <auth type> - Set player's authentication method"
+    getauth: "&a/ximultilogin getauth <player> - Get player's current authentication method"
+    allowcracked: "&a/ximultilogin allowcracked <true|false> - Set whether to allow cracked players to join"
+    allowcracked_status: "&a/ximultilogin allowcracked - View current setting"
+    reload: "&a/ximultilogin reload - Reload configuration files"
+    info: "&a/ximultilogin info - Display plugin information"
+    footer: "&6============================="
+  info:
+    title: "&6===== XiMultiLogin Plugin Info ====="
+    version: "&aVersion: 2.0"
+    author: "&aAuthor: XiNian-dada"
+    description: "&aDescription: Multi-login method support plugin"
+    command: "&aCommand: /ximultilogin help"
+    footer: "&6==============================="
+```
+
+## Usage Tutorial
+
+### Player Login Process
+
+1. **New player login**
+   - Player tries to join the server
+   - Plugin tries different authentication methods in configuration order
+   - The first successful authentication method will be recorded to the database
+   - Player logs in successfully, UUID is recorded
+
+2. **Old player login**
+   - Player tries to join the server
+   - Plugin queries the database, gets the player's historical authentication method
+   - Only use that authentication method for verification
+   - If verification is successful, use historical UUID (UUID takeover)
+   - If verification fails, reject login
+
+3. **Cracked player login** (requires `allow_cracked: true`)
+   - Player tries to join the server
+   - All authentication methods fail
+   - Plugin creates temporary identity, allows player to join
+   - Temporary identity will not be recorded to the database
+
+### Admin Commands
+
+| Command | Description | Permission |
+|---------|-------------|------------|
+| `/ximultilogin setauth <player> <auth type>` | Set player's authentication method | `ximultilogin.admin` |
+| `/ximultilogin getauth <player>` | Get player's current authentication method | `ximultilogin.admin` |
+| `/ximultilogin allowcracked <true\|false>` | Set whether to allow cracked players to join | `ximultilogin.admin` |
+| `/ximultilogin allowcracked` | View current cracked player setting | `ximultilogin.admin` |
+| `/ximultilogin reload` | Reload configuration files | `ximultilogin.admin` |
+| `/ximultilogin info` | Display plugin information | `ximultilogin.admin` |
+| `/ximultilogin help` | Display help information | None |
+
+**Authentication Type Description**:
+
+- `MOJANG`: Mojang official authentication
+- `YGGDRASIL`: Yggdrasil protocol authentication (need to specify specific Yggdrasil server name)
+
+**Examples**:
+
+```
+# Set player "Steve" to use Mojang authentication
+/ximultilogin setauth Steve MOJANG
+
+# Set player "Alex" to use LittleSkin authentication
+/ximultilogin setauth Alex LittleSkin
+
+# Query player "Steve"'s authentication method
+/ximultilogin getauth Steve
+
+# Allow cracked players to join
+/ximultilogin allowcracked true
+
+# Reload configuration
+/ximultilogin reload
+```
+
+### PAPI Variable Support
+
+If the server has PlaceholderAPI installed, the plugin provides the following variables:
+
+| Variable | Description |
+|----------|-------------|
+| `%ximultilogin_auth_provider%` | Player's current authentication method |
+| `%ximultilogin_uuid%` | Player's UUID |
+
+**Examples**:
+
+```
+# Use in chat format
+chat-format: "&a[%ximultilogin_auth_provider%] &f{player}: &f{message}"
+
+# Use in scoreboard
+scoreboard:
+  - "&aAuth method: %ximultilogin_auth_provider%"
+  - "&aUUID: %ximultilogin_uuid%"
+```
+
+### Common Usage Scenarios
+
+#### Scenario 1: Server supports both official and third-party authentication
+
+```yaml
+pipeline:
+  - type: MOJANG
+    enabled: true
+  - type: YGGDRASIL
+    name: "LittleSkin"
+    api: "https://littleskin.cn/api/yggdrasil"
+    enabled: true
+```
+
+New players will first try Mojang authentication, then LittleSkin authentication if it fails. Once successfully logged in with a certain method, subsequent logins must use the same method.
+
+#### Scenario 2: Only support third-party authentication
+
+```yaml
+pipeline:
+  - type: YGGDRASIL
+    name: "HairuoSKY"
+    api: "https://skin.hairuosky.cn/api/yggdrasil"
+    enabled: true
+```
+
+All players must use HairuoSKY authentication.
+
+#### Scenario 3: Allow cracked players
+
+```yaml
+pipeline:
+  - type: MOJANG
+    enabled: true
+
+allow_cracked: true
+```
+
+Official players use Mojang authentication, cracked players can join without authentication (temporary identity).
+
+#### Scenario 4: Player migration authentication method
+
+```
+# Player "Steve" originally used LittleSkin authentication
+/ximultilogin getauth Steve
+# Output: Player Steve's current authentication method: LittleSkin
+
+# Player wants to migrate to Mojang authentication
+/ximultilogin setauth Steve MOJANG
+# Output: Successfully set player Steve's authentication method to MOJANG!
+
+# Player will use Mojang authentication next time, but UUID remains unchanged
+```
+
+## Development Guide
+
+### Environment Requirements
+
+- **Java Version**: Java 8 or higher
+- **Maven Version**: Maven 3.6 or higher
+- **Git**: For version control
+
+### Build Project
+
+```bash
+# Clone repository
+git clone https://github.com/XiNian-dada/XiMultiLogin.git
+cd XiMultiLogin
+
+# Compile project (skip tests)
+mvn package -DskipTests
+
+# Compile and run tests
+mvn package
+
+# Generated JAR file is located at target/XiMultiLogin-2.0.jar
+```
+
+### Project Structure
+
+```
+XiMultiLogin/
+├── src/
+│   ├── main/java/com/leeinx/ximultilogin/
+│   │   ├── XiMultiLogin.java              # Main class
+│   │   ├── auth/                           # Authentication related
+│   │   │   ├── AuthProvider.java           # Authentication provider interface
+│   │   │   ├── XiSessionService.java       # Session service (core)
+│   │   │   └── providers/                  # Authentication provider implementations
+│   │   │       ├── MojangAuthProvider.java # Mojang authentication
+│   │   │       └── YggdrasilAuthProvider.java # Yggdrasil authentication
+│   │   ├── command/                        # Command related
+│   │   │   ├── XiCommandExecutor.java      # Command executor
+│   │   │   └── XiTabCompleter.java         # TAB completer
+│   │   ├── config/                         # Configuration related
+│   │   │   ├── ConfigManager.java          # Configuration manager
+│   │   │   └── MessageManager.java         # Message manager
+│   │   ├── database/                       # Database related
+│   │   │   ├── DatabaseManager.java        # Database interface
+│   │   │   ├── DatabaseFactory.java        # Database factory
+│   │   │   ├── SQLiteDatabaseManager.java   # SQLite implementation
+│   │   │   └── MySQLDatabaseManager.java   # MySQL implementation
+│   │   ├── guard/                          # Security related
+│   │   │   └── IdentityGuard.java          # Identity guard
+│   │   ├── injector/                       # Injection related
+│   │   │   └── XiInjector.java             # Injector
+│   │   ├── papi/                           # PAPI related
+│   │   │   └── XiPlaceholderExpansion.java # PAPI variables
+│   │   └── reflection/                     # Reflection related
+│   │       └── XiReflection.java          # Reflection tools
+│   ├── main/resources/
+│   │   ├── config.yml                      # Configuration file
+│   │   ├── messages.yml                    # Message configuration
+│   │   └── plugin.yml                      # Plugin configuration
+│   └── test/                               # Test code
+├── pom.xml                                 # Maven configuration
+└── README.md                               # This document
+```
+
+### Extend Authentication Method
+
+If you need to add a new authentication method, follow these steps:
+
+1. **Implement AuthProvider interface**
+
+```java
+package com.leeinx.ximultilogin.auth.providers;
+
+import com.leeinx.ximultilogin.auth.AuthProvider;
+import java.util.logging.Logger;
+
+public class CustomAuthProvider implements AuthProvider {
+    private final String name;
+    private final String apiUrl;
+    private final Logger logger;
+
+    public CustomAuthProvider(String name, String apiUrl, Logger logger) {
+        this.name = name;
+        this.apiUrl = apiUrl;
+        this.logger = logger;
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public Object authenticate(String username, String serverId) {
+        // Implement authentication logic
+        // Return GameProfile object or null
+        return null;
+    }
+}
+```
+
+2. **Register new authentication type in ConfigManager**
+
+3. **Add support for new authentication type in XiSessionService**
+
+4. **Update configuration file format**
+
+### Contribution Guide
+
+Welcome to submit Issues and Pull Requests to help improve this project!
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Frequently Asked Questions
+
+### Q1: Why does player login fail?
+
+**A**: Check the following:
+
+1. Confirm the authentication method in the configuration file is enabled (`enabled: true`)
+2. Check the console log to confirm the authentication process
+3. If it's an old player, confirm using the correct authentication method
+4. Check network connection to ensure access to authentication server
+
+### Q2: How to switch player's authentication method?
+
+**A**: Use the command `/ximultilogin setauth <player> <auth type>`.
+
+Note: After switching authentication methods, the player's UUID will not change (UUID takeover system).
+
+### Q3: Why can't cracked players join?
+
+**A**: Check the `allow_cracked` setting in the configuration file, ensure it is `true`.
+
+### Q4: How to support multiple Yggdrasil servers?
+
+**A**: Add multiple YGGDRASIL type configurations in the configuration file, each with a different `name`:
+
+```yaml
+pipeline:
+  - type: YGGDRASIL
+    name: "LittleSkin"
+    api: "https://littleskin.cn/api/yggdrasil"
+    enabled: true
+  - type: YGGDRASIL
+    name: "HairuoSKY"
+    api: "https://skin.hairuosky.cn/api/yggdrasil"
+    enabled: true
+```
+
+### Q5: Will database data be lost?
+
+**A**: No. Player identity information (name, UUID, authentication method) is persistently stored in the database and will not be lost after server restart.
+
+### Q6: Which Minecraft versions are supported?
+
+**A**: Supports Minecraft 1.16.5 - 1.21+, specially optimized for 1.20.2+ version (solved Record immutability issue).
+
+### Q7: How to view player's authentication method?
+
+**A**: Use the command `/ximultilogin getauth <player>`, or use PAPI variable `%ximultilogin_auth_provider%`.
+
+### Q8: Will the plugin affect server performance?
+
+**A**: No. The plugin uses optimized authentication process and database operations, with minimal impact on server performance. Database operations use HikariCP connection pool for further performance optimization.
+
+## Version Information
+
+### Current Version
+- **Version Number**: 2.0
+
+### Version History
+- **v2.0**: Security enhanced version
+  - Implemented depth defense mechanism, double blocking to ensure security
+  - Optimized temporary UUID generation logic, use real UUID to eliminate LuckPerms warnings
+  - Enhanced thread-safe design, use ConcurrentHashMap to handle concurrent logins
+  - Added detailed security audit logs, improved observability
+  - Improved authentication failure handling, display custom error messages instead of system default messages
+  - Optimized event listener priority, ensure security checks are executed first
+  - Improved resource cleanup mechanism, prevent memory leaks
+
+- **v1.0**: Initial version
+  - Support Mojang and Yggdrasil authentication
+  - SQLite and MySQL database support
+  - Identity locking mechanism
+  - UUID takeover system
+  - Strict authentication mode
+  - Command system
+  - PAPI variable support
+  - Message configuration system
+  - Cracked player support
+  - Multi-version compatibility (1.16.5 - 1.21+)
+  - Specially optimized for 1.20.2+ (Record support)
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details
+
+## Contact
+
+- **Author**: XiNian-dada
+- **Project Address**: https://github.com/XiNian-dada/XiMultiLogin
+- **Issue Feedback**: https://github.com/XiNian-dada/XiMultiLogin/issues
+
+---
+
+**Enjoy using XiMultiLogin!** 🎉

@@ -315,6 +315,24 @@ import java.util.logging.Logger;
         info("Debug mode set to " + debug);
         this.debugMode = debug;
     }
+    
+    /**
+     * 获取性能配置
+     * 
+     * @return 性能配置
+     */
+    public PerformanceConfig getPerformanceConfig() {
+        PerformanceConfig performanceConfig = new PerformanceConfig();
+        ConfigurationSection performanceSection = config.getConfigurationSection("performance");
+        if (performanceSection != null) {
+            performanceConfig.setDbThreadPoolSize(performanceSection.getInt("db_thread_pool_size", performanceConfig.getDbThreadPoolSize()));
+            performanceConfig.setAuthThreadPoolSize(performanceSection.getInt("auth_thread_pool_size", performanceConfig.getAuthThreadPoolSize()));
+            performanceConfig.setAuthTimeoutSeconds(performanceSection.getInt("auth_timeout_seconds", performanceConfig.getAuthTimeoutSeconds()));
+            performanceConfig.setSkinCacheSize(performanceSection.getInt("skin_cache_size", performanceConfig.getSkinCacheSize()));
+            performanceConfig.setSkinCacheExpiryMinutes(performanceSection.getInt("skin_cache_expiry_minutes", performanceConfig.getSkinCacheExpiryMinutes()));
+        }
+        return performanceConfig;
+    }
 
     /**
      * 提供者配置类
@@ -355,6 +373,66 @@ import java.util.logging.Logger;
 
         public void setApiUrl(String apiUrl) {
             this.apiUrl = apiUrl;
+        }
+    }
+
+    /**
+     * 性能配置类
+     */
+    public static class PerformanceConfig {
+        private int dbThreadPoolSize;
+        private int authThreadPoolSize;
+        private int authTimeoutSeconds;
+        private int skinCacheSize;
+        private int skinCacheExpiryMinutes;
+
+        public PerformanceConfig() {
+            // 默认值
+            this.dbThreadPoolSize = Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
+            this.authThreadPoolSize = Math.max(4, Runtime.getRuntime().availableProcessors());
+            this.authTimeoutSeconds = 8;
+            this.skinCacheSize = 1000;
+            this.skinCacheExpiryMinutes = 30;
+        }
+
+        public int getDbThreadPoolSize() {
+            return dbThreadPoolSize;
+        }
+
+        public void setDbThreadPoolSize(int dbThreadPoolSize) {
+            this.dbThreadPoolSize = Math.max(1, dbThreadPoolSize);
+        }
+
+        public int getAuthThreadPoolSize() {
+            return authThreadPoolSize;
+        }
+
+        public void setAuthThreadPoolSize(int authThreadPoolSize) {
+            this.authThreadPoolSize = Math.max(1, authThreadPoolSize);
+        }
+
+        public int getAuthTimeoutSeconds() {
+            return authTimeoutSeconds;
+        }
+
+        public void setAuthTimeoutSeconds(int authTimeoutSeconds) {
+            this.authTimeoutSeconds = Math.max(1, Math.min(30, authTimeoutSeconds));
+        }
+
+        public int getSkinCacheSize() {
+            return skinCacheSize;
+        }
+
+        public void setSkinCacheSize(int skinCacheSize) {
+            this.skinCacheSize = Math.max(100, Math.min(10000, skinCacheSize));
+        }
+
+        public int getSkinCacheExpiryMinutes() {
+            return skinCacheExpiryMinutes;
+        }
+
+        public void setSkinCacheExpiryMinutes(int skinCacheExpiryMinutes) {
+            this.skinCacheExpiryMinutes = Math.max(5, Math.min(120, skinCacheExpiryMinutes));
         }
     }
 

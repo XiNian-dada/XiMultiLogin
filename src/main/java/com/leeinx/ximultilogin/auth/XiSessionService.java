@@ -9,6 +9,7 @@ import org.bukkit.Bukkit;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 /**
@@ -113,110 +114,254 @@ public class XiSessionService {
      * @return 验证成功返回 GameProfile，验证失败返回 null
      */
     public Object hasJoinedServer(String username, String serverId, java.net.InetAddress ipAddress) {
-        LOGGER.info("XiSessionService: Authenticating player " + username);
+        try {
+            // 调用异步方法并等待结果
+            return hasJoinedServerAsync(username, serverId, ipAddress).join();
+        } catch (Exception e) {
+            LOGGER.severe("XiSessionService: Exception in hasJoinedServer: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * 异步验证玩家是否已加入服务器
+     * 这是核心验证方法，严格使用玩家的历史登录方式
+     * 
+     * @param username   玩家名称
+     * @param serverId   服务器唯一标识符
+     * @param ipAddress  IP地址（可为null）
+     * @return 验证结果的 CompletableFuture
+     */
+    public CompletableFuture<Object> hasJoinedServerAsync(String username, String serverId, java.net.InetAddress ipAddress) {
+        long startTime = System.currentTimeMillis();
+        LOGGER.info("XiSessionService: Authenticating player " + username + " (async)");
 
-        if (providers.isEmpty()) return null;
+        if (providers.isEmpty()) {
+            long endTime = System.currentTimeMillis();
+            LOGGER.info("XiSessionService: Authentication completed in " + (endTime - startTime) + "ms (no providers)");
+            return CompletableFuture.completedFuture(null);
+        }
 
         // 1. 检查历史记录 (Strict Mode)
-        String storedAuthProvider = identityGuard.getAuthProvider(username);
-        
-        if (storedAuthProvider != null) {
-            // ★★★ 严格锁定逻辑 ★★★
-            // 如果有记录，只尝试这一个。成功就进，失败就踢，绝不尝试其他。
-            LOGGER.info("XiSessionService: Player " + username + " is LOCKED to provider: " + storedAuthProvider);
-            
-            AuthProvider provider = providerMap.get(storedAuthProvider);
-            if (provider != null) {
-                try {
-                    Object profile = provider.authenticate(username, serverId);
-                    if (profile != null) {
-                        // 验证成功，清理之前的失败记录
-                        if (loginListener != null) {
-                            // 清理失败记录
-                            loginListener.clearAuthFailure(username);
-                        }
+        return identityGuard.getAuthProviderAsync(username)
+                .thenCompose(storedAuthProvider -> {
+                    if (storedAuthProvider != null) {
+                        // ★★★ 严格锁定逻辑 ★★★
+                        // 如果有记录，只尝试这一个。成功就进，失败就踢，绝不尝试其他。
+                        LOGGER.info("XiSessionService: Player " + username + " is LOCKED to provider: " + storedAuthProvider);
                         
-                        // 验证成功，接管 UUID
-                        LOGGER.info("XiSessionService: Strict auth successful via " + storedAuthProvider);
-                        return takeOverUUID(profile, provider.getName());
+                        AuthProvider provider = providerMap.get(storedAuthProvider);
+                        if (provider != null) {
+                            try {
+                                long providerStartTime = System.currentTimeMillis();
+                                Object profile = provider.authenticate(username, serverId);
+                                long providerEndTime = System.currentTimeMillis();
+                                LOGGER.info("XiSessionService: Provider " + provider.getName() + " took " + (providerEndTime - providerStartTime) + "ms");
+                                
+                                if (profile != null) {
+                                    // 验证成功，记录成功的提供者
+                                    if (loginListener != null) {
+                                        loginListener.clearAuthFailure(username);
+                                        loginListener.recordAuthSuccess(username, provider.getName());
+                                    }
+                                    
+                                    // 验证成功，接管 UUID
+                                    LOGGER.info("XiSessionService: Strict auth successful via " + storedAuthProvider);
+                                    return takeOverUUIDAsync(profile, provider.getName())
+                                            .thenApply(result -> {
+                                                long endTime = System.currentTimeMillis();
+                                                LOGGER.info("XiSessionService: Authentication completed in " + (endTime - startTime) + "ms (strict mode)");
+                                                return result;
+                                            });
+                                } else {
+                                    // 验证失败 -> 延迟拒绝（返回临时Profile）
+                                    LOGGER.warning("XiSessionService: Strict auth FAILED. Player locked to " + storedAuthProvider + " but verification failed.");
+                                    LOGGER.warning("XiSessionService: Deferring rejection to show custom kick message.");
+                                    
+                                    // 记录认证失败原因，用于显示自定义消息
+                                    if (loginListener != null) {
+                                        loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
+                                    }
+                                    
+                                    // 返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
+                                    Object tempProfile = createTemporaryProfile(username);
+                                    long endTime = System.currentTimeMillis();
+                                    LOGGER.info("XiSessionService: Authentication completed in " + (endTime - startTime) + "ms (strict mode failed)");
+                                    return CompletableFuture.completedFuture(tempProfile);
+                                }
+                            } catch (Exception e) {
+                                LOGGER.severe("XiSessionService: Provider error: " + e.getMessage());
+                                
+                                // 记录认证失败原因
+                                if (loginListener != null) {
+                                    loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
+                                }
+                                
+                                // 返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
+                                Object tempProfile = createTemporaryProfile(username);
+                                long endTime = System.currentTimeMillis();
+                                LOGGER.info("XiSessionService: Authentication completed in " + (endTime - startTime) + "ms (strict mode error)");
+                                return CompletableFuture.completedFuture(tempProfile);
+                            }
+                        } else {
+                            // 如果锁定的 Provider 被删了或者改名了
+                            LOGGER.warning("XiSessionService: Player locked to " + storedAuthProvider + " but that provider is missing from config!");
+                            LOGGER.warning("XiSessionService: Falling back to full pipeline (Safety Mechanism).");
+                            // 只有这种极端配置错误情况，才允许回退，否则死循环进不去
+                            return tryAllProvidersAsync(username, serverId)
+                                    .thenApply(result -> {
+                                        long endTime = System.currentTimeMillis();
+                                        LOGGER.info("XiSessionService: Authentication completed in " + (endTime - startTime) + "ms (fallback to pipeline)");
+                                        return result;
+                                    });
+                        }
                     } else {
-                        // 验证失败 -> 延迟拒绝（返回临时Profile）
-                        LOGGER.warning("XiSessionService: Strict auth FAILED. Player locked to " + storedAuthProvider + " but verification failed.");
-                        LOGGER.warning("XiSessionService: Deferring rejection to show custom kick message.");
-                        
-                        // 记录认证失败原因，用于显示自定义消息
-                        if (loginListener != null) {
-                            loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
-                        }
-                        
-                        // 返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
-                        return createTemporaryProfile(username);
+                        // 2. 新玩家逻辑 (遍历尝试)
+                        return tryAllProvidersAsync(username, serverId)
+                                .thenApply(result -> {
+                                    long endTime = System.currentTimeMillis();
+                                    LOGGER.info("XiSessionService: Authentication completed in " + (endTime - startTime) + "ms (pipeline mode)");
+                                    return result;
+                                });
                     }
-                } catch (Exception e) {
-                    LOGGER.severe("XiSessionService: Provider error: " + e.getMessage());
-                    
-                    // 记录认证失败原因
-                    if (loginListener != null) {
-                        loginListener.recordAuthFailure(username, "strict_auth_failed", storedAuthProvider);
-                    }
-                    
-                    // 返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
-                    return createTemporaryProfile(username);
-                }
-            } else {
-                // 如果锁定的 Provider 被删了或者改名了
-                LOGGER.warning("XiSessionService: Player locked to " + storedAuthProvider + " but that provider is missing from config!");
-                LOGGER.warning("XiSessionService: Falling back to full pipeline (Safety Mechanism).");
-                // 只有这种极端配置错误情况，才允许回退，否则死循环进不去
+                });
+    }
+    
+    // 认证线程池
+    private static final java.util.concurrent.ExecutorService AUTH_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(
+            Math.max(4, Runtime.getRuntime().availableProcessors()),
+            r -> {
+                Thread t = new Thread(r, "XiMultiLogin-Auth-Thread");
+                t.setDaemon(true);
+                return t;
             }
-        }
-
-        // 2. 新玩家逻辑 (遍历尝试)
-        // 只有 storedAuthProvider == null (新玩家) 才会走到这里
+    );
+    
+    /**
+     * 尝试所有认证提供者（异步）
+     * 
+     * @param username 玩家名称
+     * @param serverId 服务器唯一标识符
+     * @return 验证结果的 CompletableFuture
+     */
+    private CompletableFuture<Object> tryAllProvidersAsync(String username, String serverId) {
         LOGGER.info("XiSessionService: New player detected. Trying all providers...");
         
+        // 并行尝试所有认证提供者
+        List<CompletableFuture<Object>> providerFutures = new ArrayList<>();
+        
         for (AuthProvider provider : providers) {
-            try {
-                Object profile = provider.authenticate(username, serverId);
-                if (profile != null) {
-                    // 验证成功，清理之前的失败记录
-                    if (loginListener != null) {
-                        loginListener.clearAuthFailure(username);
-                    }
+            CompletableFuture<Object> future = CompletableFuture.supplyAsync(() -> {
+                try {
+                    // 设置5秒超时（Java 8 兼容方式）
+                    CompletableFuture<Object> providerFuture = CompletableFuture.supplyAsync(() -> {
+                        try {
+                            return provider.authenticate(username, serverId);
+                        } catch (Exception e) {
+                            LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + e.getMessage());
+                            return null;
+                        }
+                    });
                     
-                    LOGGER.info("XiSessionService: First-time auth successful via " + provider.getName());
-                    return takeOverUUID(profile, provider.getName());
+                    // 实现超时逻辑
+                    CompletableFuture<Object> timeoutFuture = new CompletableFuture<>();
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(5000);
+                            if (!providerFuture.isDone()) {
+                                timeoutFuture.complete(null);
+                                LOGGER.warning("XiSessionService: Provider " + provider.getName() + " timed out");
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }).start();
+                    
+                    return providerFuture.applyToEither(timeoutFuture, result -> result).join();
+                } catch (Exception e) {
+                    LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + e.getMessage());
+                    return null;
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
+            }, AUTH_EXECUTOR);
+            providerFutures.add(future);
+        }
+        
+        // 等待所有结果完成，最多等待8秒（Java 8 兼容方式）
+        CompletableFuture<Void> allOf = CompletableFuture.allOf(providerFutures.toArray(new CompletableFuture[0]));
+        CompletableFuture<Void> allOfWithTimeout = new CompletableFuture<>();
+        
+        // 实现超时逻辑
+        new Thread(() -> {
+            try {
+                Thread.sleep(8000);
+                if (!allOf.isDone()) {
+                    allOfWithTimeout.complete(null);
+                    LOGGER.warning("XiSessionService: Authentication process timed out");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-        }
-
-        LOGGER.info("XiSessionService: All providers failed to authenticate " + username);
+        }).start();
         
-        // 记录所有认证方式都失败
-        if (loginListener != null) {
-            loginListener.recordAuthFailure(username, "all_providers_failed", null);
-        }
+        allOf.thenAccept(v -> {
+            if (!allOfWithTimeout.isDone()) {
+                allOfWithTimeout.complete(null);
+            }
+        }).exceptionally(ex -> {
+            if (!allOfWithTimeout.isDone()) {
+                allOfWithTimeout.complete(null);
+            }
+            return null;
+        });
         
-        // 检查是否允许盗版玩家
-        if (configManager.isAllowCracked()) {
-            LOGGER.info("XiSessionService: Allowing cracked player " + username + " to join");
-            // 为盗版玩家创建临时身份
-            Object temporaryProfile = createTemporaryProfile(username);
-            if (temporaryProfile != null) {
-                // 验证临时身份
-                boolean identityVerified = verifyIdentityWithReflection(temporaryProfile, "CRACKED");
-                if (identityVerified) {
-                    LOGGER.info("XiSessionService: Temporary identity created for cracked player " + username);
-                    return temporaryProfile;
+        return allOfWithTimeout.thenCompose(v -> {
+            // 找到第一个成功的认证提供者
+            for (int i = 0; i < providerFutures.size(); i++) {
+                try {
+                    Object profile = providerFutures.get(i).get();
+                    if (profile != null) {
+                        AuthProvider provider = providers.get(i);
+                        // 验证成功，记录成功的提供者
+                        if (loginListener != null) {
+                            loginListener.clearAuthFailure(username);
+                            loginListener.recordAuthSuccess(username, provider.getName());
+                        }
+                        
+                        LOGGER.info("XiSessionService: First-time auth successful via " + provider.getName());
+                        return takeOverUUIDAsync(profile, provider.getName());
+                    }
+                } catch (Exception e) {
+                    // 忽略异常
                 }
             }
-        }
-        
-        // 所有认证方式都失败，返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
-        LOGGER.info("XiSessionService: Deferring rejection for all providers failed case.");
-        return createTemporaryProfile(username);
+            
+            // 所有认证方式都失败
+            LOGGER.info("XiSessionService: All providers failed to authenticate " + username);
+            
+            // 记录所有认证方式都失败
+            if (loginListener != null) {
+                loginListener.recordAuthFailure(username, "all_providers_failed", null);
+            }
+            
+            // 检查是否允许盗版玩家
+            if (configManager.isAllowCracked()) {
+                LOGGER.info("XiSessionService: Allowing cracked player " + username + " to join");
+                // 为盗版玩家创建临时身份
+                Object temporaryProfile = createTemporaryProfile(username);
+                if (temporaryProfile != null) {
+                    // 验证临时身份
+                    boolean identityVerified = verifyIdentityWithReflection(temporaryProfile, "CRACKED");
+                    if (identityVerified) {
+                        LOGGER.info("XiSessionService: Temporary identity created for cracked player " + username);
+                        return CompletableFuture.completedFuture(temporaryProfile);
+                    }
+                }
+            }
+            
+            // 所有认证方式都失败，返回临时Profile，诱导NMS放行，然后在AsyncPlayerPreLoginEvent中踢出
+            LOGGER.info("XiSessionService: Deferring rejection for all providers failed case.");
+            return CompletableFuture.completedFuture(createTemporaryProfile(username));
+        });
     }
     
     /**
@@ -329,6 +474,50 @@ public class XiSessionService {
         } catch (Exception e) {
             LOGGER.warning("XiSessionService: Exception taking over UUID: " + e.getMessage());
             return profile;
+        }
+    }
+    
+    /**
+     * 异步接管UUID并创建新的GameProfile
+     * 
+     * @param profile 原始GameProfile
+     * @param providerName 提供者名称
+     * @return 带有固定UUID的GameProfile的 CompletableFuture
+     */
+    private CompletableFuture<Object> takeOverUUIDAsync(Object profile, String providerName) {
+        try {
+            // 使用反射获取名称和ID
+            String name = (String) profile.getClass().getMethod("getName").invoke(profile);
+            Object idObj = profile.getClass().getMethod("getId").invoke(profile);
+            java.util.UUID incomingUuid = (java.util.UUID) idObj;
+            
+            // 异步获取固定UUID
+            return identityGuard.getOrCreateIdentityAsync(name, incomingUuid, providerName)
+                    .thenApply(fixedUuid -> {
+                        if (fixedUuid == null) {
+                            LOGGER.warning("XiSessionService: Failed to get fixed UUID for " + name);
+                            return profile;
+                        }
+                        
+                        // 如果UUID相同，直接返回
+                        if (fixedUuid.equals(incomingUuid)) {
+                            LOGGER.info("XiSessionService: UUID already fixed for " + name + ": " + fixedUuid);
+                            return profile;
+                        }
+                        
+                        // 使用固定UUID创建新的GameProfile
+                        try {
+                            Object newProfile = createGameProfile(fixedUuid, name);
+                            LOGGER.info("XiSessionService: UUID taken over for " + name + ": " + incomingUuid + " -> " + fixedUuid);
+                            return newProfile;
+                        } catch (Exception e) {
+                            LOGGER.warning("XiSessionService: Exception creating GameProfile: " + e.getMessage());
+                            return profile;
+                        }
+                    });
+        } catch (Exception e) {
+            LOGGER.warning("XiSessionService: Exception taking over UUID: " + e.getMessage());
+            return CompletableFuture.completedFuture(profile);
         }
     }
     

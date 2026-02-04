@@ -11,7 +11,7 @@ prefix: "&6[XiMultiLogin] &r"
 # 登录相关消息
 login:
   # 登录成功
-  success: "&a登录成功！欢迎回来，{player}！"
+  success: "&a登录成功！您是通过 {provider} 认证进入服务器的，欢迎回来，{player}！"
   # 登录失败
   failed: "&c登录失败：{reason}"
   # 昵称重合

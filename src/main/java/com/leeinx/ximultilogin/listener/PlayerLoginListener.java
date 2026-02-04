@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 
 import java.util.Map;
@@ -25,6 +26,7 @@ public class PlayerLoginListener implements Listener {
 
     private final Map<String, String> failedAuthReasons = new ConcurrentHashMap<>();
     private final Map<String, String> failedAuthProviders = new ConcurrentHashMap<>();
+    private final Map<String, String> successfulAuthProviders = new ConcurrentHashMap<>();
 
     /**
      * 构造 PlayerLoginListener
@@ -122,6 +124,30 @@ public class PlayerLoginListener implements Listener {
     }
 
     /**
+     * 监听玩家加入事件
+     * 发送认证成功的消息给玩家
+     *
+     * @param event 玩家加入事件
+     */
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        org.bukkit.entity.Player player = event.getPlayer();
+        String username = player.getName();
+        
+        // 检查是否有认证成功记录
+        String provider = successfulAuthProviders.get(username);
+        if (provider != null) {
+            // 发送认证成功的消息
+            String joinMessage = messageManager.getMessage("login.success", "provider", provider);
+            player.sendMessage(joinMessage);
+            LOGGER.info("PlayerLoginListener: Sent auth success message to " + username + " (provider: " + provider + ")");
+            
+            // 清理成功记录
+            successfulAuthProviders.remove(username);
+        }
+    }
+
+    /**
      * 监听玩家退出事件
      * 确保失败记录被清理
      *
@@ -134,6 +160,11 @@ public class PlayerLoginListener implements Listener {
         // 清理失败记录
         if (failedAuthReasons.remove(username) != null || failedAuthProviders.remove(username) != null) {
             LOGGER.info("PlayerLoginListener: Cleaned up auth failure records for " + username + " on quit");
+        }
+        
+        // 清理成功记录
+        if (successfulAuthProviders.remove(username) != null) {
+            LOGGER.info("PlayerLoginListener: Cleaned up auth success records for " + username + " on quit");
         }
     }
 
@@ -151,17 +182,35 @@ public class PlayerLoginListener implements Listener {
         if (provider != null) {
             failedAuthProviders.put(username, provider);
         }
+        // 清理可能存在的成功记录
+        successfulAuthProviders.remove(username);
     }
 
     /**
-     * 清理过期的认证失败记录
+     * 记录认证成功的提供者
+     * 这个方法会在 XiSessionService 中调用
+     *
+     * @param username 玩家名称
+     * @param provider 认证提供者
+     */
+    public void recordAuthSuccess(String username, String provider) {
+        LOGGER.info("PlayerLoginListener: Recording auth success for " + username + " (provider: " + provider + ")");
+        successfulAuthProviders.put(username, provider);
+        // 清理可能存在的失败记录
+        failedAuthReasons.remove(username);
+        failedAuthProviders.remove(username);
+    }
+
+    /**
+     * 清理过期的认证记录
      * 定期调用以防止内存泄漏
      */
     public void cleanupOldRecords() {
         long currentTime = System.currentTimeMillis();
         failedAuthReasons.clear();
         failedAuthProviders.clear();
-        LOGGER.info("PlayerLoginListener: Cleaned up old auth failure records");
+        successfulAuthProviders.clear();
+        LOGGER.info("PlayerLoginListener: Cleaned up old auth records");
     }
     
     /**
@@ -173,6 +222,17 @@ public class PlayerLoginListener implements Listener {
     public void clearAuthFailure(String username) {
         if (failedAuthReasons.remove(username) != null || failedAuthProviders.remove(username) != null) {
             LOGGER.info("PlayerLoginListener: Cleared auth failure record for " + username);
+        }
+    }
+
+    /**
+     * 清除指定玩家的认证成功记录
+     * 
+     * @param username 玩家名称
+     */
+    public void clearAuthSuccess(String username) {
+        if (successfulAuthProviders.remove(username) != null) {
+            LOGGER.info("PlayerLoginListener: Cleared auth success record for " + username);
         }
     }
 }

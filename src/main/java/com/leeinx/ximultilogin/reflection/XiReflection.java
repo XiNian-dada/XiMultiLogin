@@ -95,8 +95,8 @@ public class XiReflection {
      */
     private static boolean isRecordClass(Class<?> clazz) {
         try {
-            // 尝试调用 isRecord() 方法
-            Method isRecordMethod = clazz.getClass().getMethod("isRecord");
+            // 尝试调用 isRecord() 方法（Class 类的方法）
+            Method isRecordMethod = Class.class.getMethod("isRecord");
             return (boolean) isRecordMethod.invoke(clazz);
         } catch (Exception e) {
             // 如果方法不存在，说明不是 Record 类
@@ -275,7 +275,8 @@ public class XiReflection {
      */
     private static Object[] getRecordComponents(Class<?> recordClass) {
         try {
-            Method getRecordComponentsMethod = recordClass.getMethod("getRecordComponents");
+            // getRecordComponents() 是 Class 类的方法，不是 Record 类的方法
+            Method getRecordComponentsMethod = Class.class.getMethod("getRecordComponents");
             return (Object[]) getRecordComponentsMethod.invoke(recordClass);
         } catch (Exception e) {
             LOGGER.warning("XiReflection: Failed to get record components: " + e.getMessage());

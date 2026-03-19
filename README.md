@@ -7,7 +7,9 @@
 
 ## 中文
 
-XiMultiLogin 是一个为 Minecraft Bukkit/Spigot/Paper 服务器设计的多认证方式支持插件，旨在解决 MultiLogin 取消对 Bukkit 平台支持后，社区缺乏替代方案的问题。
+XiMultiLogin 是一个为 Minecraft Bukkit/Spigot/Paper/Folia 服务器设计的多认证方式支持插件，旨在解决 MultiLogin 取消对 Bukkit 平台支持后，社区缺乏替代方案的问题。
+
+当前发布版本为 [v2.3](https://github.com/XiNian-dada/XiMultiLogin/releases/tag/v2.3)，同一个 JAR 可同时运行在 Paper 和 Folia 上。
 
 ## 背景
 
@@ -43,11 +45,22 @@ MultiLogin 是一个优秀的 Minecraft 多认证插件，但由于开发团队�
 - **盗版玩家支持**：可选是否允许未通过认证的玩家加入
 
 ### 技术特性
-- **多版本兼容**：支持 Minecraft 1.16.5 - 1.21+，特别优化 1.20.2+（暂未测试 稳定性待定）
+- **多版本兼容**：支持 Minecraft 1.16.5 - 1.21+，已验证 Paper/Folia 1.20.1 与 1.21.11
 - **动态代理机制**：解决 ClassLoader 隔离问题
 - **Record 重构支持**：处理 Java Record 的不可变性
 - **反射工具**：跨版本的反射操作，适配不同 NMS 类结构
 - **数据库支持**：SQLite（默认）和 MySQL，使用 HikariCP 连接池
+- **Folia 调度兼容**：同一个 JAR 在 Bukkit/Paper/Folia 间运行时自动切换调度策略
+- **自动化冒烟测试**：内置真实服务端启动脚本，验证插件启用、反射注入和停服恢复
+
+### 已验证的平台矩阵
+
+| 服务端 | 版本 | 状态 |
+|------|------|------|
+| Paper | 1.20.1-196 | 已验证 |
+| Paper | 1.21.11-127 | 已验证 |
+| Folia | 1.20.1-17 | 已验证 |
+| Folia | 1.21.11-14 | 已验证 |
 
 ## 工作原理
 
@@ -152,7 +165,7 @@ XiSessionService.hasJoinedServer()
 ### 系统要求
 
 - **Java 版本**：Java 8 或更高版本
-- **服务器类型**：Bukkit/Spigot/Paper 1.16.5 - 1.21+
+- **服务器类型**：Bukkit/Spigot/Paper/Folia 1.16.5 - 1.21+
 - **依赖插件**：PlaceholderAPI（可选，用于 PAPI 变量支持）
 
 ### 安装步骤
@@ -168,7 +181,7 @@ XiSessionService.hasJoinedServer()
 3. **首次启动**
    - 插件会自动创建配置文件和数据库
    - 默认使用 SQLite 数据库，无需额外配置
-   - 检查控制台日志，确保插件正常加载
+   - 检查控制台日志，确保出现 `XiReflection: Session service replacement succeeded` 与 `XiMultiLogin: Session service injected successfully`
 
 ## 配置说明
 
@@ -294,7 +307,7 @@ other:
     footer: "&6============================="
   info:
     title: "&6===== XiMultiLogin 插件信息 ====="
-    version: "&a版本: 2.0"
+    version: "&a版本: 2.3"
     author: "&a作者: XiNian-dada"
     description: "&a描述: 多登录方式支持插件"
     command: "&a指令: /ximultilogin help"
@@ -456,7 +469,17 @@ mvn package -DskipTests
 # 编译并运行测试
 mvn package
 
-# 生成的 JAR 文件位于 target/XiMultiLogin-1.0.jar
+# 生成的 JAR 文件位于 target/XiMultiLogin-2.3.jar
+
+# 使用根目录中的服务端 JAR 做真实冒烟测试
+bash scripts/smoke-all-server-jars.sh
+```
+
+如果只想验证单个服务端：
+
+```bash
+bash scripts/smoke-server-jar.sh paper-1.21.11-127.jar
+bash scripts/smoke-server-jar.sh folia-1.21.11-14.jar
 ```
 
 ### 项目结构
@@ -596,7 +619,7 @@ pipeline:
 
 ### Q6: 支持哪些 Minecraft 版本？
 
-**A**: 支持 Minecraft 1.16.5 - 1.21+，特别优化了 1.20.2+ 版本（解决了 Record 不可变性问题）。
+**A**: 支持 Minecraft 1.16.5 - 1.21+。当前已自动化验证 Paper/Folia 1.20.1 与 1.21.11，并对 1.20.2+ 的 Record 结构做了专门适配。
 
 ### Q7: 如何查看玩家的认证方式？
 
@@ -609,9 +632,16 @@ pipeline:
 ## 版本信息
 
 ### 当前版本
-- **版本号**：2.0
+- **版本号**：2.3
 
 ### 版本历史
+- **v2.3**：Paper/Folia 兼容版本
+  - 同一个 JAR 同时支持 Paper 与 Folia
+  - 新增运行时调度桥接，兼容 Bukkit、Paper 和 Folia 调度模型
+  - 修复 1.20.1/1.21.x 下的 SessionService 反射注入与恢复
+  - 将命令、PAPI 和缓存路径调整为更适合 Folia 的执行方式
+  - 新增单元测试与真实服务端冒烟测试脚本
+
 - **v2.0**：安全增强版本
   - 实现深度防御机制，双重阻塞确保安全性
   - 优化临时UUID生成逻辑，使用真实UUID消除LuckPerms警告
@@ -650,7 +680,9 @@ pipeline:
 
 ## English
 
-XiMultiLogin is a multi-authentication plugin designed for Minecraft Bukkit/Spigot/Paper servers. It aims to solve the problem of the community lacking alternatives after MultiLogin discontinued support for the Bukkit platform.
+XiMultiLogin is a multi-authentication plugin designed for Minecraft Bukkit/Spigot/Paper/Folia servers. It aims to solve the problem of the community lacking alternatives after MultiLogin discontinued support for the Bukkit platform.
+
+The current release is [v2.3](https://github.com/XiNian-dada/XiMultiLogin/releases/tag/v2.3), and the same JAR is intended to run on both Paper and Folia.
 
 ## Background
 
@@ -686,11 +718,22 @@ MultiLogin is an excellent Minecraft multi-authentication plugin, but due to the
 - **Cracked Player Support**: Optional whether to allow players who fail authentication to join
 
 ### Technical Features
-- **Multi-Version Compatibility**: Support Minecraft 1.16.5 - 1.21+, specially optimized for 1.20.2+ (stability pending testing)
+- **Multi-Version Compatibility**: Support Minecraft 1.16.5 - 1.21+, verified on Paper/Folia 1.20.1 and 1.21.11
 - **Dynamic Proxy Mechanism**: Solve ClassLoader isolation issues
 - **Record Reconstruction Support**: Handle immutability of Java Record
 - **Reflection Tools**: Cross-version reflection operations, adapt to different NMS class structures
 - **Database Support**: SQLite (default) and MySQL, using HikariCP connection pool
+- **Folia Scheduler Compatibility**: The same JAR switches scheduling strategy automatically on Bukkit, Paper and Folia
+- **Automated Smoke Tests**: Includes real server startup scripts to verify plugin enable, reflection injection and restoration on shutdown
+
+### Verified Platform Matrix
+
+| Server | Version | Status |
+|------|------|------|
+| Paper | 1.20.1-196 | Verified |
+| Paper | 1.21.11-127 | Verified |
+| Folia | 1.20.1-17 | Verified |
+| Folia | 1.21.11-14 | Verified |
 
 ## Working Principle
 
@@ -795,7 +838,7 @@ Has record?
 ### System Requirements
 
 - **Java Version**: Java 8 or higher
-- **Server Type**: Bukkit/Spigot/Paper 1.16.5 - 1.21+
+- **Server Type**: Bukkit/Spigot/Paper/Folia 1.16.5 - 1.21+
 - **Dependency Plugins**: PlaceholderAPI (optional, for PAPI variable support)
 
 ### Installation Steps
@@ -811,7 +854,7 @@ Has record?
 3. **First startup**
    - The plugin will automatically create configuration files and database
    - SQLite database is used by default, no additional configuration required
-   - Check the console log to ensure the plugin loads normally
+   - Check the console log and make sure both `XiReflection: Session service replacement succeeded` and `XiMultiLogin: Session service injected successfully` appear
 
 ## Configuration Instructions
 
@@ -947,7 +990,7 @@ other:
     footer: "&6============================="
   info:
     title: "&6===== XiMultiLogin Plugin Info ====="
-    version: "&aVersion: 2.0"
+    version: "&aVersion: 2.3"
     author: "&aAuthor: XiNian-dada"
     description: "&aDescription: Multi-login method support plugin"
     command: "&aCommand: /ximultilogin help"
@@ -1109,7 +1152,17 @@ mvn package -DskipTests
 # Compile and run tests
 mvn package
 
-# Generated JAR file is located at target/XiMultiLogin-2.0.jar
+# Generated JAR file is located at target/XiMultiLogin-2.3.jar
+
+# Run real smoke tests with the server jars in the repository root
+bash scripts/smoke-all-server-jars.sh
+```
+
+If you only want to test a single server:
+
+```bash
+bash scripts/smoke-server-jar.sh paper-1.21.11-127.jar
+bash scripts/smoke-server-jar.sh folia-1.21.11-14.jar
 ```
 
 ### Project Structure
@@ -1249,7 +1302,7 @@ pipeline:
 
 ### Q6: Which Minecraft versions are supported?
 
-**A**: Supports Minecraft 1.16.5 - 1.21+, specially optimized for 1.20.2+ version (solved Record immutability issue).
+**A**: Supports Minecraft 1.16.5 - 1.21+. Paper/Folia 1.20.1 and 1.21.11 are currently covered by automated smoke tests, and 1.20.2+ has dedicated Record-structure handling.
 
 ### Q7: How to view player's authentication method?
 
@@ -1262,9 +1315,16 @@ pipeline:
 ## Version Information
 
 ### Current Version
-- **Version Number**: 2.0
+- **Version Number**: 2.3
 
 ### Version History
+- **v2.3**: Paper/Folia compatibility release
+  - The same JAR now runs on both Paper and Folia
+  - Added a runtime scheduler bridge for Bukkit, Paper and Folia
+  - Fixed SessionService reflection injection and restoration on 1.20.1 and 1.21.x
+  - Adjusted command, PAPI and cache paths to better fit Folia execution rules
+  - Added unit tests and real server smoke-test scripts
+
 - **v2.0**: Security enhanced version
   - Implemented depth defense mechanism, double blocking to ensure security
   - Optimized temporary UUID generation logic, use real UUID to eliminate LuckPerms warnings

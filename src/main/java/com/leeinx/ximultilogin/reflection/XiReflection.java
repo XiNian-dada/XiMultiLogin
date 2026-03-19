@@ -138,14 +138,27 @@ public class XiReflection {
 
             wrapperField.setAccessible(true);
             Object oldWrapper = wrapperField.get(serverInstance);
+            Object adaptedService = adaptSessionServiceValue(newService, sessionType);
+            if (adaptedService == null) {
+                LOGGER.severe("XiReflection: Failed to adapt replacement session service.");
+                return false;
+            }
 
             if (isRecord) {
                 LOGGER.info("XiReflection: Reconstructing Record with Proxy...");
-                return reconstructAndSwapRecord(serverInstance, wrapperField, oldWrapper, newService, sessionType);
+                boolean replaced = reconstructAndSwapRecord(serverInstance, wrapperField, oldWrapper, adaptedService, sessionType);
+                if (replaced) {
+                    LOGGER.info("XiReflection: Session service replacement succeeded via record reconstruction.");
+                }
+                return replaced;
             } else {
                 LOGGER.info("XiReflection: Injecting normal field...");
                 Field inner = getFieldByType(oldWrapper.getClass(), sessionType);
-                return injectField(oldWrapper, inner, newService);
+                boolean replaced = injectField(oldWrapper, inner, adaptedService);
+                if (replaced) {
+                    LOGGER.info("XiReflection: Session service replacement succeeded via direct field injection.");
+                }
+                return replaced;
             }
         } catch (Exception e) {
             LOGGER.severe("XiReflection: Error: " + e.getMessage());
@@ -154,7 +167,7 @@ public class XiReflection {
         }
     }
 
-    private static boolean reconstructAndSwapRecord(Object targetHolder, Field holderField, Object oldRecord, Object newSessionService, Class<?> sessionType) {
+    private static boolean reconstructAndSwapRecord(Object targetHolder, Field holderField, Object oldRecord, Object replacementValue, Class<?> sessionType) {
         try {
             Class<?> recordClass = oldRecord.getClass();
             
@@ -167,6 +180,16 @@ public class XiReflection {
             
             Object[] newArgs = new Object[components.length];
             Class<?>[] paramTypes = new Class<?>[components.length];
+            Field sessionField = getFieldByType(recordClass, sessionType);
+            String sessionFieldName = sessionField == null ? null : sessionField.getName();
+            Object currentSessionValue = null;
+
+            if (sessionField != null) {
+                sessionField.setAccessible(true);
+                currentSessionValue = sessionField.get(oldRecord);
+            }
+
+            boolean replacedAnyComponent = false;
 
             for (int i = 0; i < components.length; i++) {
                 Object rc = components[i];
@@ -177,80 +200,20 @@ public class XiReflection {
                 String componentName = getRecordComponentName(rc);
                 
                 paramTypes[i] = componentType;
-                
-                accessor.setAccessible(true);
-                Object value = accessor.invoke(oldRecord);
+                Object value = readRecordComponentValue(oldRecord, rc, componentName, accessor);
 
-                // 判断是否是 SessionService 字段 (通过类名判断，忽略 ClassLoader 差异)
-                if (componentType.getName().equals(sessionType.getName())) {
-                    LOGGER.info("XiReflection: Swapping " + componentName + " with Loose Proxy.");
-                    
-                    // ★★★ 核心修复：智能参数适配代理 (Smart Parameter Adapter Proxy) ★★★
-                    // 使用 Record 组件期待的 ClassLoader 和 接口类型
-                    Object proxy = Proxy.newProxyInstance(
-                        componentType.getClassLoader(),
-                        new Class<?>[]{ componentType }, // 强制使用 Record 要求的接口
-                        (proxyObj, method, args) -> {
-                            try {
-                                // 尝试直接调用，使用松散匹配
-                                Method targetMethod = findMethodLoose(newSessionService.getClass(), method.getName(), args == null ? 0 : args.length);
-                                
-                                if (targetMethod != null) {
-                                    targetMethod.setAccessible(true);
-                                    try {
-                                        // 尝试直接调用
-                                        return targetMethod.invoke(newSessionService, args);
-                                    } catch (IllegalArgumentException e) {
-                                        // 参数类型不匹配，尝试智能适配
-                                        LOGGER.info("XiReflection: Parameter type mismatch, trying smart adaptation...");
-                                        
-                                        // 检查是否是 hasJoinedServer 方法，且第一个参数是 GameProfile
-                                        if (method.getName().equals("hasJoinedServer") && args != null && args.length == 3) {
-                                            // 尝试从第一个参数(GameProfile)中提取用户名
-                                            try {
-                                                Object firstArg = args[0];
-                                                // 检查是否有 getName 方法
-                                                Method getNameMethod = firstArg.getClass().getMethod("getName");
-                                                String username = (String) getNameMethod.invoke(firstArg);
-                                                
-                                                // 创建新的参数数组，使用用户名代替 GameProfile
-                                                Object[] adaptedArgs = new Object[]{username, args[1], args[2]};
-                                                
-                                                // 查找并调用接受 String 的版本
-                                                Method stringVersionMethod = findMethodLoose(
-                                                    newSessionService.getClass(), 
-                                                    "hasJoinedServer", 
-                                                    3
-                                                );
-                                                
-                                                if (stringVersionMethod != null) {
-                                                    stringVersionMethod.setAccessible(true);
-                                                    return stringVersionMethod.invoke(newSessionService, adaptedArgs);
-                                                }
-                                            } catch (Exception ex) {
-                                                LOGGER.warning("XiReflection: Smart adaptation failed: " + ex.getMessage());
-                                            }
-                                        }
-                                        
-                                        // 如果智能适配失败，重新抛出原异常
-                                        throw e;
-                                    }
-                                } else {
-                                    LOGGER.severe("XiReflection: Method not found in XiSessionService: " + method.getName());
-                                    throw new NoSuchMethodException(method.getName());
-                                }
-                            } catch (Exception e) {
-                                LOGGER.severe("XiReflection: Proxy invocation failed: " + e.getMessage());
-                                e.printStackTrace();
-                                throw e;
-                            }
-                        }
-                    );
-                    
-                    newArgs[i] = proxy; // 塞入代理对象
+                if (shouldReplaceRecordComponent(componentType, sessionType, componentName, sessionFieldName, value, currentSessionValue)) {
+                    LOGGER.info("XiReflection: Swapping " + componentName + " with adapted session service.");
+                    newArgs[i] = replacementValue;
+                    replacedAnyComponent = true;
                 } else {
                     newArgs[i] = value;
                 }
+            }
+
+            if (!replacedAnyComponent) {
+                LOGGER.severe("XiReflection: Failed to locate record component for session service replacement.");
+                return false;
             }
 
             Constructor<?> constructor = recordClass.getDeclaredConstructor(paramTypes);
@@ -306,12 +269,43 @@ public class XiReflection {
      * @return 访问方法
      */
     private static Method getRecordComponentAccessor(Object recordComponent) {
+        Class<?> componentType = getRecordComponentType(recordComponent);
         try {
             Method getAccessorMethod = recordComponent.getClass().getMethod("getAccessor");
-            return (Method) getAccessorMethod.invoke(recordComponent);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to get record component accessor", e);
+            Method accessor = (Method) getAccessorMethod.invoke(recordComponent);
+            if (isMatchingComponentAccessor(accessor, componentType)) {
+                return accessor;
+            }
+        } catch (Exception ignored) {
         }
+
+        try {
+            String componentName = getRecordComponentName(recordComponent);
+            Class<?> declaringRecord = getDeclaringRecordClass(recordComponent);
+            if (declaringRecord != null) {
+                try {
+                    Method declaredMethod = declaringRecord.getDeclaredMethod(componentName);
+                    if (isMatchingComponentAccessor(declaredMethod, componentType)) {
+                        declaredMethod.setAccessible(true);
+                        return declaredMethod;
+                    }
+                } catch (NoSuchMethodException ignored) {
+                }
+
+                for (Method method : declaringRecord.getDeclaredMethods()) {
+                    if (method.getName().equals(componentName)
+                            && method.getParameterCount() == 0
+                            && isMatchingComponentAccessor(method, componentType)) {
+                        method.setAccessible(true);
+                        return method;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warning("XiReflection: Failed to resolve record component accessor: " + e.getMessage());
+        }
+
+        return null;
     }
 
     /**
@@ -354,7 +348,146 @@ public class XiReflection {
         return null;
     }
 
+    private static Object adaptSessionServiceValue(Object service, Class<?> sessionType) {
+        if (service == null) {
+            return null;
+        }
+        if (sessionType.isInstance(service)) {
+            return service;
+        }
+        if (!sessionType.isInterface()) {
+            LOGGER.severe("XiReflection: Session service type is not an interface: " + sessionType.getName());
+            return null;
+        }
+
+        return Proxy.newProxyInstance(
+                sessionType.getClassLoader(),
+                new Class<?>[]{sessionType},
+                (proxyObj, method, args) -> invokeAdaptedSessionMethod(service, method, args)
+        );
+    }
+
+    private static Object invokeAdaptedSessionMethod(Object targetService, Method method, Object[] args) throws Exception {
+        try {
+            Method targetMethod = findMethodLoose(targetService.getClass(), method.getName(), args == null ? 0 : args.length);
+
+            if (targetMethod != null) {
+                targetMethod.setAccessible(true);
+                try {
+                    return targetMethod.invoke(targetService, args);
+                } catch (IllegalArgumentException e) {
+                    LOGGER.info("XiReflection: Parameter type mismatch, trying smart adaptation...");
+
+                    if (method.getName().equals("hasJoinedServer") && args != null && args.length == 3) {
+                        try {
+                            Object firstArg = args[0];
+                            Method getNameMethod = firstArg.getClass().getMethod("getName");
+                            String username = (String) getNameMethod.invoke(firstArg);
+                            Object[] adaptedArgs = new Object[]{username, args[1], args[2]};
+                            Method stringVersionMethod = findMethodLoose(targetService.getClass(), "hasJoinedServer", 3);
+
+                            if (stringVersionMethod != null) {
+                                stringVersionMethod.setAccessible(true);
+                                return stringVersionMethod.invoke(targetService, adaptedArgs);
+                            }
+                        } catch (Exception ex) {
+                            LOGGER.warning("XiReflection: Smart adaptation failed: " + ex.getMessage());
+                        }
+                    }
+
+                    throw e;
+                }
+            }
+
+            LOGGER.severe("XiReflection: Method not found in XiSessionService: " + method.getName());
+            throw new NoSuchMethodException(method.getName());
+        } catch (Exception e) {
+            LOGGER.severe("XiReflection: Proxy invocation failed: " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
+    }
+
+    private static boolean shouldReplaceRecordComponent(Class<?> componentType, Class<?> sessionType, String componentName, String sessionFieldName, Object value, Object currentSessionValue) {
+        if (!componentType.getName().equals(sessionType.getName())) {
+            return false;
+        }
+        if (sessionFieldName != null && sessionFieldName.equals(componentName)) {
+            return true;
+        }
+        if (currentSessionValue != null && value == currentSessionValue) {
+            return true;
+        }
+        return sessionFieldName == null && currentSessionValue == null;
+    }
+
+    private static boolean isMatchingComponentAccessor(Method accessor, Class<?> componentType) {
+        return accessor != null
+                && accessor.getParameterCount() == 0
+                && accessor.getReturnType().getName().equals(componentType.getName());
+    }
+
+    private static Object readRecordComponentValue(Object oldRecord, Object recordComponent, String componentName, Method accessor) throws Exception {
+        Class<?> componentType = getRecordComponentType(recordComponent);
+        if (accessor != null) {
+            accessor.setAccessible(true);
+            return accessor.invoke(oldRecord);
+        }
+
+        Field field = findFieldByName(oldRecord.getClass(), componentName);
+        if (field != null) {
+            field.setAccessible(true);
+            return field.get(oldRecord);
+        }
+
+        Method fallbackAccessor = findZeroArgMethod(oldRecord.getClass(), componentName);
+        if (isMatchingComponentAccessor(fallbackAccessor, componentType)) {
+            fallbackAccessor.setAccessible(true);
+            return fallbackAccessor.invoke(oldRecord);
+        }
+
+        throw new NoSuchFieldException("No accessor or field for record component " + componentName + " in " + oldRecord.getClass().getName());
+    }
+
+    private static Class<?> getDeclaringRecordClass(Object recordComponent) {
+        try {
+            Method declaringRecordMethod = recordComponent.getClass().getMethod("getDeclaringRecord");
+            return (Class<?>) declaringRecordMethod.invoke(recordComponent);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Field findFieldByName(Class<?> clazz, String fieldName) {
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    private static Method findZeroArgMethod(Class<?> clazz, String methodName) {
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getName().equals(methodName) && method.getParameterCount() == 0) {
+                    return method;
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return null;
+    }
+
     private static boolean injectField(Object target, Field field, Object value) {
+        if (field == null) {
+            LOGGER.severe("XiReflection: Target field is null during injection.");
+            return false;
+        }
         try {
             field.setAccessible(true);
             field.set(target, value);

@@ -1,3 +1,6 @@
 /.idea
 /.trae
 target/
+.smoke/
+paper-*.jar
+folia-*.jar

@@ -4,8 +4,8 @@ import com.Leeinx.ximultilogin.XiMultiLogin;
 import com.Leeinx.ximultilogin.config.ConfigManager;
 import com.Leeinx.ximultilogin.config.MessageManager;
 import com.Leeinx.ximultilogin.guard.IdentityGuard;
+import com.Leeinx.ximultilogin.platform.SchedulerBridge;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -13,6 +13,7 @@ import org.bukkit.entity.Player;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 /**
@@ -26,6 +27,7 @@ public class XiCommandExecutor implements CommandExecutor {
     private final IdentityGuard identityGuard;
     private final ConfigManager configManager;
     private final MessageManager messageManager;
+    private final SchedulerBridge schedulerBridge;
 
     /**
      * 构造 XiCommandExecutor
@@ -37,6 +39,7 @@ public class XiCommandExecutor implements CommandExecutor {
         this.identityGuard = plugin.getIdentityGuard();
         this.configManager = plugin.getConfigManager();
         this.messageManager = plugin.getMessageManager();
+        this.schedulerBridge = plugin.getSchedulerBridge();
     }
 
     @Override
@@ -99,30 +102,26 @@ public class XiCommandExecutor implements CommandExecutor {
             return true;
         }
 
-        // 获取玩家的UUID
-        UUID playerUUID = null;
-        Player player = Bukkit.getPlayer(playerName);
-        if (player != null) {
-            playerUUID = player.getUniqueId();
-        } else {
-            // 尝试从数据库获取
-            playerUUID = identityGuard.getUUID(playerName);
-        }
+        resolvePlayerUuid(playerName).thenCompose(playerUUID -> {
+            if (playerUUID == null) {
+                reply(sender, messageManager.getMessage("error.player_not_found", "player", playerName));
+                return CompletableFuture.completedFuture(null);
+            }
 
-        if (playerUUID == null) {
-            sender.sendMessage(messageManager.getMessage("error.player_not_found", "player", playerName));
-            return true;
-        }
-
-        // 设置认证方式
-        boolean success = identityGuard.updateAuthProvider(playerName, playerUUID, authType);
-        if (success) {
-            sender.sendMessage(messageManager.getMessage("command.set_auth", "player", playerName, "auth", authType));
-            LOGGER.info("XiMultiLogin: Admin " + sender.getName() + " set auth type for " + playerName + " to " + authType);
-        } else {
-            sender.sendMessage(messageManager.getMessage("error.config_error", "reason", "设置认证方式失败"));
-        }
-
+            return identityGuard.updateAuthProviderAsync(playerName, playerUUID, authType)
+                    .thenAccept(success -> {
+                        if (success) {
+                            reply(sender, messageManager.getMessage("command.set_auth", "player", playerName, "auth", authType));
+                            LOGGER.info("XiMultiLogin: Admin " + sender.getName() + " set auth type for " + playerName + " to " + authType);
+                        } else {
+                            reply(sender, messageManager.getMessage("error.config_error", "reason", "设置认证方式失败"));
+                        }
+                    });
+        }).exceptionally(ex -> {
+            reply(sender, messageManager.getMessage("error.config_error", "reason", "设置认证方式失败"));
+            LOGGER.warning("XiMultiLogin: Failed to set auth for " + playerName + ": " + ex.getMessage());
+            return null;
+        });
         return true;
     }
 
@@ -148,14 +147,19 @@ public class XiCommandExecutor implements CommandExecutor {
 
         String playerName = args[1];
 
-        // 获取认证方式
-        String authType = identityGuard.getAuthProvider(playerName);
-        if (authType != null) {
-            sender.sendMessage(messageManager.getMessage("command.get_auth", "player", playerName, "auth", authType));
-        } else {
-            sender.sendMessage(messageManager.getMessage("error.player_not_found", "player", playerName));
-        }
+        identityGuard.getAuthProviderAsync(playerName).whenComplete((authType, throwable) -> {
+            if (throwable != null) {
+                reply(sender, messageManager.getMessage("error.config_error", "reason", "获取认证方式失败"));
+                LOGGER.warning("XiMultiLogin: Failed to get auth for " + playerName + ": " + throwable.getMessage());
+                return;
+            }
 
+            if (authType != null) {
+                reply(sender, messageManager.getMessage("command.get_auth", "player", playerName, "auth", authType));
+            } else {
+                reply(sender, messageManager.getMessage("error.player_not_found", "player", playerName));
+            }
+        });
         return true;
     }
 
@@ -279,5 +283,23 @@ public class XiCommandExecutor implements CommandExecutor {
         }
         
         return false;
+    }
+
+    private CompletableFuture<UUID> resolvePlayerUuid(String playerName) {
+        return identityGuard.getUUIDAsync(playerName).thenCompose(cachedUuid -> {
+            if (cachedUuid != null) {
+                return CompletableFuture.completedFuture(cachedUuid);
+            }
+
+            Player player = Bukkit.getPlayerExact(playerName);
+            if (player == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return schedulerBridge.supplyForEntity(player, player::getUniqueId);
+        });
+    }
+
+    private void reply(CommandSender sender, String message) {
+        schedulerBridge.runForSender(sender, () -> sender.sendMessage(message));
     }
 }

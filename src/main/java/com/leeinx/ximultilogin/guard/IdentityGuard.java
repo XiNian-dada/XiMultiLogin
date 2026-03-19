@@ -6,8 +6,12 @@ import com.Leeinx.ximultilogin.database.DatabaseFactory;
 import com.Leeinx.ximultilogin.database.DatabaseManager;
 import org.bukkit.Bukkit;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.logging.Logger;
 
 /**
@@ -18,6 +22,9 @@ public class IdentityGuard {
 
     private static final Logger LOGGER = Bukkit.getLogger();
     private final AsyncDatabaseManager databaseManager;
+    private final ConcurrentMap<String, UUID> uuidCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, String> authProviderCache = new ConcurrentHashMap<>();
+    private final Set<String> missingCache = ConcurrentHashMap.newKeySet();
 
     /**
      * 构造 IdentityGuard
@@ -66,6 +73,7 @@ public class IdentityGuard {
                         return databaseManager.storeIdentityAsync(name, incomingUuid, authProvider)
                                 .thenApply(stored -> {
                                     if (stored) {
+                                        cacheIdentity(name, incomingUuid, authProvider);
                                         LOGGER.info("IdentityGuard: New identity registered: " + name + " -> " + incomingUuid + " (" + authProvider + ")");
                                         return true;
                                     } else {
@@ -78,6 +86,7 @@ public class IdentityGuard {
                         return databaseManager.updateAuthProviderAsync(name, storedUuid, authProvider)
                                 .thenApply(updated -> {
                                     if (updated) {
+                                        cacheIdentity(name, storedUuid, authProvider);
                                         LOGGER.info("IdentityGuard: Auth provider updated for " + name + " to " + authProvider);
                                     }
                                     LOGGER.info("IdentityGuard: Identity verified: " + name + " -> " + storedUuid + " (using stored UUID)");
@@ -120,6 +129,7 @@ public class IdentityGuard {
                         return databaseManager.storeIdentityAsync(name, incomingUuid, authProvider)
                                 .thenApply(stored -> {
                                     if (stored) {
+                                        cacheIdentity(name, incomingUuid, authProvider);
                                         LOGGER.info("IdentityGuard: Created new identity: " + name + " -> " + incomingUuid + " (" + authProvider + ")");
                                         return incomingUuid;
                                     } else {
@@ -132,6 +142,7 @@ public class IdentityGuard {
                         return databaseManager.updateAuthProviderAsync(name, storedUuid, authProvider)
                                 .thenApply(updated -> {
                                     if (updated) {
+                                        cacheIdentity(name, storedUuid, authProvider);
                                         LOGGER.info("IdentityGuard: Updated auth provider for " + name + " to " + authProvider + " (keeping UUID: " + storedUuid + ")");
                                     }
                                     return storedUuid;
@@ -147,7 +158,21 @@ public class IdentityGuard {
      * @return 认证提供者名称，若不存在返回 null
      */
     public String getAuthProvider(String name) {
-        return databaseManager.getAuthProvider(name);
+        String cached = authProviderCache.get(name);
+        if (cached != null) {
+            return cached;
+        }
+        if (missingCache.contains(name)) {
+            return null;
+        }
+
+        String authProvider = databaseManager.getAuthProvider(name);
+        if (authProvider != null) {
+            cacheAuthProvider(name, authProvider);
+        } else if (!uuidCache.containsKey(name)) {
+            missingCache.add(name);
+        }
+        return authProvider;
     }
     
     /**
@@ -157,7 +182,23 @@ public class IdentityGuard {
      * @return 认证提供者名称的 CompletableFuture，若不存在返回 null
      */
     public CompletableFuture<String> getAuthProviderAsync(String name) {
-        return databaseManager.getAuthProviderAsync(name);
+        String cached = authProviderCache.get(name);
+        if (cached != null) {
+            return CompletableFuture.completedFuture(cached);
+        }
+        if (missingCache.contains(name)) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        return databaseManager.getAuthProviderAsync(name)
+                .thenApply(authProvider -> {
+                    if (authProvider != null) {
+                        cacheAuthProvider(name, authProvider);
+                    } else if (!uuidCache.containsKey(name)) {
+                        missingCache.add(name);
+                    }
+                    return authProvider;
+                });
     }
 
     /**
@@ -167,7 +208,21 @@ public class IdentityGuard {
      * @return 玩家UUID，若不存在返回 null
      */
     public UUID getUUID(String name) {
-        return databaseManager.getUUID(name);
+        UUID cached = uuidCache.get(name);
+        if (cached != null) {
+            return cached;
+        }
+        if (missingCache.contains(name)) {
+            return null;
+        }
+
+        UUID uuid = databaseManager.getUUID(name);
+        if (uuid != null) {
+            cacheUuid(name, uuid);
+        } else if (!authProviderCache.containsKey(name)) {
+            missingCache.add(name);
+        }
+        return uuid;
     }
     
     /**
@@ -177,7 +232,23 @@ public class IdentityGuard {
      * @return 玩家UUID的 CompletableFuture，若不存在返回 null
      */
     public CompletableFuture<UUID> getUUIDAsync(String name) {
-        return databaseManager.getUUIDAsync(name);
+        UUID cached = uuidCache.get(name);
+        if (cached != null) {
+            return CompletableFuture.completedFuture(cached);
+        }
+        if (missingCache.contains(name)) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        return databaseManager.getUUIDAsync(name)
+                .thenApply(uuid -> {
+                    if (uuid != null) {
+                        cacheUuid(name, uuid);
+                    } else if (!authProviderCache.containsKey(name)) {
+                        missingCache.add(name);
+                    }
+                    return uuid;
+                });
     }
 
     /**
@@ -214,6 +285,7 @@ public class IdentityGuard {
                         return databaseManager.updateAuthProviderAsync(name, storedUuid, authProvider)
                                 .thenApply(updated -> {
                                     if (updated) {
+                                        cacheIdentity(name, storedUuid, authProvider);
                                         LOGGER.info("IdentityGuard: Auth provider updated for " + name + " to " + authProvider);
                                     } else {
                                         LOGGER.warning("IdentityGuard: Failed to update auth provider for " + name);
@@ -225,6 +297,7 @@ public class IdentityGuard {
                         return databaseManager.storeIdentityAsync(name, uuid, authProvider)
                                 .thenApply(stored -> {
                                     if (stored) {
+                                        cacheIdentity(name, uuid, authProvider);
                                         LOGGER.info("IdentityGuard: New identity registered: " + name + " -> " + uuid + " (" + authProvider + ")");
                                     } else {
                                         LOGGER.warning("IdentityGuard: Failed to store new identity: " + name + " -> " + uuid + " (" + authProvider + ")");
@@ -246,6 +319,44 @@ public class IdentityGuard {
         if (databaseManager != null) {
             databaseManager.close();
             LOGGER.info("IdentityGuard: Database connection closed");
+        }
+    }
+
+    public UUID getCachedUUID(String name) {
+        return uuidCache.get(name);
+    }
+
+    public String getCachedAuthProvider(String name) {
+        return authProviderCache.get(name);
+    }
+
+    public Set<String> getKnownPlayerNames() {
+        Set<String> names = new HashSet<>(uuidCache.keySet());
+        names.addAll(authProviderCache.keySet());
+        return names;
+    }
+
+    public void warmupIdentity(String name) {
+        getUUIDAsync(name);
+        getAuthProviderAsync(name);
+    }
+
+    private void cacheIdentity(String name, UUID uuid, String authProvider) {
+        cacheUuid(name, uuid);
+        cacheAuthProvider(name, authProvider);
+    }
+
+    private void cacheUuid(String name, UUID uuid) {
+        if (uuid != null) {
+            uuidCache.put(name, uuid);
+            missingCache.remove(name);
+        }
+    }
+
+    private void cacheAuthProvider(String name, String authProvider) {
+        if (authProvider != null) {
+            authProviderCache.put(name, authProvider);
+            missingCache.remove(name);
         }
     }
 }

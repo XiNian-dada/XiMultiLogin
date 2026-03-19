@@ -2,12 +2,13 @@ package com.Leeinx.ximultilogin.command;
 
 import com.Leeinx.ximultilogin.XiMultiLogin;
 import com.Leeinx.ximultilogin.config.ConfigManager;
+import com.Leeinx.ximultilogin.guard.IdentityGuard;
+import com.Leeinx.ximultilogin.platform.SchedulerBridge;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +20,8 @@ import java.util.List;
 public class XiTabCompleter implements TabCompleter {
 
     private final ConfigManager configManager;
+    private final IdentityGuard identityGuard;
+    private final SchedulerBridge schedulerBridge;
 
     /**
      * 构造 XiTabCompleter
@@ -27,6 +30,8 @@ public class XiTabCompleter implements TabCompleter {
      */
     public XiTabCompleter(XiMultiLogin plugin) {
         this.configManager = plugin.getConfigManager();
+        this.identityGuard = plugin.getIdentityGuard();
+        this.schedulerBridge = plugin.getSchedulerBridge();
     }
 
     @Override
@@ -56,9 +61,17 @@ public class XiTabCompleter implements TabCompleter {
             // 补全玩家名或布尔值
             String subCommand = args[0].toLowerCase();
             if (subCommand.equals("setauth") || subCommand.equals("getauth")) {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    if (player.getName().toLowerCase().startsWith(args[1].toLowerCase())) {
-                        completions.add(player.getName());
+                if (schedulerBridge.isFoliaServer()) {
+                    for (String playerName : identityGuard.getKnownPlayerNames()) {
+                        if (playerName.toLowerCase().startsWith(args[1].toLowerCase())) {
+                            completions.add(playerName);
+                        }
+                    }
+                } else {
+                    for (Player player : Bukkit.getOnlinePlayers()) {
+                        if (player.getName().toLowerCase().startsWith(args[1].toLowerCase())) {
+                            completions.add(player.getName());
+                        }
                     }
                 }
             } else if (subCommand.equals("allowcracked")) {

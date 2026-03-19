@@ -15,6 +15,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
 
     private final XiMultiLogin plugin;
     private final IdentityGuard identityGuard;
+    private final boolean foliaServer;
 
     /**
      * 构造 XiPlaceholderExpansion
@@ -24,6 +25,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
     public XiPlaceholderExpansion(XiMultiLogin plugin) {
         this.plugin = plugin;
         this.identityGuard = plugin.getIdentityGuard();
+        this.foliaServer = plugin.getSchedulerBridge() != null && plugin.getSchedulerBridge().isFoliaServer();
     }
 
     @Override
@@ -80,7 +82,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
      * @return 认证类型，若不存在返回 "Unknown"
      */
     private String getAuthType(String playerName) {
-        String authType = identityGuard.getAuthProvider(playerName);
+        String authType = resolveAuthProvider(playerName);
         return authType != null ? authType : "Unknown";
     }
 
@@ -91,7 +93,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
      * @return 格式化的认证类型名称
      */
     private String getAuthTypeDisplay(String playerName) {
-        String authType = identityGuard.getAuthProvider(playerName);
+        String authType = resolveAuthProvider(playerName);
         if (authType == null) {
             return "未知";
         }
@@ -113,7 +115,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
      * @return UUID字符串，若不存在返回 "Unknown"
      */
     private String getUUID(String playerName) {
-        UUID uuid = identityGuard.getUUID(playerName);
+        UUID uuid = resolveUuid(playerName);
         return uuid != null ? uuid.toString() : "Unknown";
     }
     
@@ -124,7 +126,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
      * @return "true" 或 "false"
      */
     private String isCracked(String playerName) {
-        String authType = identityGuard.getAuthProvider(playerName);
+        String authType = resolveAuthProvider(playerName);
         return authType != null && authType.equals("CRACKED") ? "true" : "false";
     }
     
@@ -135,7 +137,7 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
      * @return 登录状态描述
      */
     private String getPlayerStatus(String playerName) {
-        String authType = identityGuard.getAuthProvider(playerName);
+        String authType = resolveAuthProvider(playerName);
         if (authType == null) {
             return "未知";
         }
@@ -150,5 +152,29 @@ public class XiPlaceholderExpansion extends PlaceholderExpansion {
             default:
                 return authType;
         }
+    }
+
+    private String resolveAuthProvider(String playerName) {
+        String cached = identityGuard.getCachedAuthProvider(playerName);
+        if (cached != null) {
+            return cached;
+        }
+        if (foliaServer) {
+            identityGuard.warmupIdentity(playerName);
+            return null;
+        }
+        return identityGuard.getAuthProvider(playerName);
+    }
+
+    private UUID resolveUuid(String playerName) {
+        UUID cached = identityGuard.getCachedUUID(playerName);
+        if (cached != null) {
+            return cached;
+        }
+        if (foliaServer) {
+            identityGuard.warmupIdentity(playerName);
+            return null;
+        }
+        return identityGuard.getUUID(playerName);
     }
 }

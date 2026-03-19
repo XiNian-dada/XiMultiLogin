@@ -8,12 +8,12 @@ import com.Leeinx.ximultilogin.command.XiCommandExecutor;
 import com.Leeinx.ximultilogin.command.XiTabCompleter;
 import com.Leeinx.ximultilogin.injector.XiInjector;
 import com.Leeinx.ximultilogin.listener.PlayerLoginListener;
+import com.Leeinx.ximultilogin.platform.SchedulerBridge;
 import com.Leeinx.ximultilogin.reflection.XiReflection;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
-import java.lang.reflect.Method;
 import java.util.logging.Logger;
 
 /**
@@ -30,6 +30,7 @@ public class XiMultiLogin extends JavaPlugin {
     private Object originalSessionService;
     private XiSessionService xiSessionService;
     private PlayerLoginListener loginListener;
+    private SchedulerBridge schedulerBridge;
 
     /**
      * 插件加载时调用
@@ -86,6 +87,10 @@ public class XiMultiLogin extends JavaPlugin {
         if (debugMode) {
             LOGGER.info("XiMultiLogin: Debug mode enabled - verbose logging will be used");
         }
+
+        schedulerBridge = new SchedulerBridge(this);
+        LOGGER.info("XiMultiLogin: Scheduler mode = "
+                + (schedulerBridge.isFoliaServer() ? "Folia" : schedulerBridge.hasModernSchedulers() ? "Paper-modern" : "Bukkit-compatible"));
         
         // 注册登录监听器
         loginListener = new PlayerLoginListener(this);
@@ -160,7 +165,11 @@ public class XiMultiLogin extends JavaPlugin {
     @Override
     public void onDisable() {
         LOGGER.info("XiMultiLogin: Disabling plugin...");
-        
+
+        if (schedulerBridge != null) {
+            schedulerBridge.cancelPluginTasks();
+        }
+
         // 恢复原始会话服务
         if (originalSessionService != null && xiInjector != null) {
             try {
@@ -174,6 +183,10 @@ public class XiMultiLogin extends JavaPlugin {
                 LOGGER.severe("XiMultiLogin: Exception during restoration: " + e.getMessage());
                 e.printStackTrace();
             }
+        }
+
+        if (xiSessionService != null) {
+            xiSessionService.close();
         }
         
         // 关闭数据库连接
@@ -236,5 +249,9 @@ public class XiMultiLogin extends JavaPlugin {
      */
     public MessageManager getMessageManager() {
         return messageManager;
+    }
+
+    public SchedulerBridge getSchedulerBridge() {
+        return schedulerBridge;
     }
 }

@@ -10,6 +10,12 @@ import org.bukkit.Bukkit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.logging.Logger;
 
 /**
@@ -25,6 +31,8 @@ public class XiSessionService {
     private final IdentityGuard identityGuard;
     private final ConfigManager configManager;
     private final PlayerLoginListener loginListener;
+    private final ExecutorService authExecutor;
+    private final ScheduledExecutorService timeoutScheduler;
 
     /**
      * 构造 XiSessionService
@@ -41,6 +49,19 @@ public class XiSessionService {
         this.loginListener = loginListener;
         this.providers = new ArrayList<>();
         this.providerMap = new java.util.HashMap<>();
+        this.authExecutor = Executors.newFixedThreadPool(
+                Math.max(4, Runtime.getRuntime().availableProcessors()),
+                r -> {
+                    Thread t = new Thread(r, "XiMultiLogin-Auth-Thread");
+                    t.setDaemon(true);
+                    return t;
+                }
+        );
+        this.timeoutScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "XiMultiLogin-Auth-Timeout");
+            t.setDaemon(true);
+            return t;
+        });
         initializeProviders(configManager);
     }
 
@@ -227,16 +248,6 @@ public class XiSessionService {
                 });
     }
     
-    // 认证线程池
-    private static final java.util.concurrent.ExecutorService AUTH_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(
-            Math.max(4, Runtime.getRuntime().availableProcessors()),
-            r -> {
-                Thread t = new Thread(r, "XiMultiLogin-Auth-Thread");
-                t.setDaemon(true);
-                return t;
-            }
-    );
-    
     /**
      * 尝试所有认证提供者（异步）
      * 
@@ -251,74 +262,41 @@ public class XiSessionService {
         List<CompletableFuture<Object>> providerFutures = new ArrayList<>();
         
         for (AuthProvider provider : providers) {
-            CompletableFuture<Object> future = CompletableFuture.supplyAsync(() -> {
-                try {
-                    // 设置5秒超时（Java 8 兼容方式）
-                    CompletableFuture<Object> providerFuture = CompletableFuture.supplyAsync(() -> {
+            CompletableFuture<Object> future = withTimeout(
+                    CompletableFuture.supplyAsync(() -> {
                         try {
                             return provider.authenticate(username, serverId);
                         } catch (Exception e) {
                             LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + e.getMessage());
                             return null;
                         }
-                    });
-                    
-                    // 实现超时逻辑
-                    CompletableFuture<Object> timeoutFuture = new CompletableFuture<>();
-                    new Thread(() -> {
-                        try {
-                            Thread.sleep(5000);
-                            if (!providerFuture.isDone()) {
-                                timeoutFuture.complete(null);
-                                LOGGER.warning("XiSessionService: Provider " + provider.getName() + " timed out");
-                            }
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                    }).start();
-                    
-                    return providerFuture.applyToEither(timeoutFuture, result -> result).join();
-                } catch (Exception e) {
-                    LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + e.getMessage());
-                    return null;
+                    }, authExecutor),
+                    5,
+                    TimeUnit.SECONDS,
+                    "XiSessionService: Provider " + provider.getName() + " timed out"
+            ).exceptionally(ex -> {
+                if (ex != null && ex.getMessage() != null) {
+                    LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + ex.getMessage());
                 }
-            }, AUTH_EXECUTOR);
+                return null;
+            });
             providerFutures.add(future);
         }
         
         // 等待所有结果完成，最多等待8秒（Java 8 兼容方式）
         CompletableFuture<Void> allOf = CompletableFuture.allOf(providerFutures.toArray(new CompletableFuture[0]));
-        CompletableFuture<Void> allOfWithTimeout = new CompletableFuture<>();
-        
-        // 实现超时逻辑
-        new Thread(() -> {
-            try {
-                Thread.sleep(8000);
-                if (!allOf.isDone()) {
-                    allOfWithTimeout.complete(null);
-                    LOGGER.warning("XiSessionService: Authentication process timed out");
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }).start();
-        
-        allOf.thenAccept(v -> {
-            if (!allOfWithTimeout.isDone()) {
-                allOfWithTimeout.complete(null);
-            }
-        }).exceptionally(ex -> {
-            if (!allOfWithTimeout.isDone()) {
-                allOfWithTimeout.complete(null);
-            }
-            return null;
-        });
+        CompletableFuture<Void> allOfWithTimeout = withTimeout(
+                allOf,
+                8,
+                TimeUnit.SECONDS,
+                "XiSessionService: Authentication process timed out"
+        ).handle((ignored, throwable) -> null);
         
         return allOfWithTimeout.thenCompose(v -> {
             // 找到第一个成功的认证提供者
             for (int i = 0; i < providerFutures.size(); i++) {
                 try {
-                    Object profile = providerFutures.get(i).get();
+                    Object profile = providerFutures.get(i).join();
                     if (profile != null) {
                         AuthProvider provider = providers.get(i);
                         // 验证成功，记录成功的提供者
@@ -362,6 +340,18 @@ public class XiSessionService {
             LOGGER.info("XiSessionService: Deferring rejection for all providers failed case.");
             return CompletableFuture.completedFuture(createTemporaryProfile(username));
         });
+    }
+
+    private <T> CompletableFuture<T> withTimeout(CompletableFuture<T> future, long timeout, TimeUnit unit, String timeoutMessage) {
+        CompletableFuture<T> timeoutFuture = new CompletableFuture<>();
+        ScheduledFuture<?> scheduledFuture = timeoutScheduler.schedule(() -> {
+            if (timeoutFuture.complete(null) && timeoutMessage != null) {
+                LOGGER.warning(timeoutMessage);
+            }
+        }, timeout, unit);
+
+        return future.applyToEither(timeoutFuture, Function.identity())
+                .whenComplete((result, throwable) -> scheduledFuture.cancel(false));
     }
     
     /**
@@ -579,5 +569,10 @@ public class XiSessionService {
      */
     public IdentityGuard getIdentityGuard() {
         return identityGuard;
+    }
+
+    public void close() {
+        authExecutor.shutdownNow();
+        timeoutScheduler.shutdownNow();
     }
 }

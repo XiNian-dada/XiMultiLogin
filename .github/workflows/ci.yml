@@ -2,7 +2,7 @@ name: Auto Release with Changelog
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, folia-dev ]
   workflow_dispatch:
 
 permissions:

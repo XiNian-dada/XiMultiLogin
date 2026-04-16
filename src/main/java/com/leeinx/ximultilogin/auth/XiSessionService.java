@@ -363,7 +363,7 @@ public class XiSessionService {
     private Object createTemporaryProfile(String username) {
         try {
             // 使用反射创建临时GameProfile
-            Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
+            // runtime profile type is handled by AuthlibAdapter
             
             // 尝试获取真实UUID（如果存在）
             java.util.UUID uuid = identityGuard.getUUID(username);
@@ -374,8 +374,7 @@ public class XiSessionService {
             }
             
             // 创建GameProfile实例
-            java.lang.reflect.Constructor<?> constructor = gameProfileClass.getConstructor(java.util.UUID.class, String.class);
-            Object gameProfile = constructor.newInstance(uuid, username);
+            Object gameProfile = AuthlibAdapter.createAuthResult(uuid, username);
             
             LOGGER.info("XiSessionService: Created temporary profile for " + username + " with UUID " + uuid);
             return gameProfile;
@@ -417,10 +416,13 @@ public class XiSessionService {
     private boolean verifyIdentityWithReflection(Object profile, String providerName) {
         try {
             // 使用反射获取名称和ID
-            String name = (String) profile.getClass().getMethod("getName").invoke(profile);
-            Object idObj = profile.getClass().getMethod("getId").invoke(profile);
+            String name = AuthlibAdapter.extractName(profile);
+            java.util.UUID incomingUuid = AuthlibAdapter.extractUuid(profile);
             // 将Object转换为UUID
-            java.util.UUID incomingUuid = (java.util.UUID) idObj;
+            if (name == null || incomingUuid == null) {
+                LOGGER.warning("XiSessionService: Missing profile identity data during verification");
+                return false;
+            }
             
             // 验证身份并获取固定UUID
             return identityGuard.verifyIdentity(name, incomingUuid, providerName);
@@ -440,11 +442,14 @@ public class XiSessionService {
     private Object takeOverUUID(Object profile, String providerName) {
         try {
             // 使用反射获取名称和ID
-            String name = (String) profile.getClass().getMethod("getName").invoke(profile);
-            Object idObj = profile.getClass().getMethod("getId").invoke(profile);
-            java.util.UUID incomingUuid = (java.util.UUID) idObj;
+            String name = AuthlibAdapter.extractName(profile);
+            java.util.UUID incomingUuid = AuthlibAdapter.extractUuid(profile);
             
             // 获取固定UUID
+            if (name == null || incomingUuid == null) {
+                LOGGER.warning("XiSessionService: Missing profile identity data during UUID takeover");
+                return profile;
+            }
             java.util.UUID fixedUuid = identityGuard.getOrCreateIdentity(name, incomingUuid, providerName);
             if (fixedUuid == null) {
                 LOGGER.warning("XiSessionService: Failed to get fixed UUID for " + name);
@@ -458,7 +463,7 @@ public class XiSessionService {
             }
             
             // 使用固定UUID创建新的GameProfile
-            Object newProfile = createGameProfile(fixedUuid, name);
+            Object newProfile = AuthlibAdapter.replaceIdentity(profile, fixedUuid, name);
             LOGGER.info("XiSessionService: UUID taken over for " + name + ": " + incomingUuid + " -> " + fixedUuid);
             return newProfile;
         } catch (Exception e) {
@@ -477,11 +482,14 @@ public class XiSessionService {
     private CompletableFuture<Object> takeOverUUIDAsync(Object profile, String providerName) {
         try {
             // 使用反射获取名称和ID
-            String name = (String) profile.getClass().getMethod("getName").invoke(profile);
-            Object idObj = profile.getClass().getMethod("getId").invoke(profile);
-            java.util.UUID incomingUuid = (java.util.UUID) idObj;
+            String name = AuthlibAdapter.extractName(profile);
+            java.util.UUID incomingUuid = AuthlibAdapter.extractUuid(profile);
             
             // 异步获取固定UUID
+            if (name == null || incomingUuid == null) {
+                LOGGER.warning("XiSessionService: Missing profile identity data during async UUID takeover");
+                return CompletableFuture.completedFuture(profile);
+            }
             return identityGuard.getOrCreateIdentityAsync(name, incomingUuid, providerName)
                     .thenApply(fixedUuid -> {
                         if (fixedUuid == null) {
@@ -497,11 +505,11 @@ public class XiSessionService {
                         
                         // 使用固定UUID创建新的GameProfile
                         try {
-                            Object newProfile = createGameProfile(fixedUuid, name);
+                            Object newProfile = AuthlibAdapter.replaceIdentity(profile, fixedUuid, name);
                             LOGGER.info("XiSessionService: UUID taken over for " + name + ": " + incomingUuid + " -> " + fixedUuid);
                             return newProfile;
                         } catch (Exception e) {
-                            LOGGER.warning("XiSessionService: Exception creating GameProfile: " + e.getMessage());
+                            LOGGER.warning("XiSessionService: Exception rebuilding auth result: " + e.getMessage());
                             return profile;
                         }
                     });
@@ -520,9 +528,7 @@ public class XiSessionService {
      */
     private Object createGameProfile(java.util.UUID uuid, String name) {
         try {
-            Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
-            java.lang.reflect.Constructor<?> constructor = gameProfileClass.getConstructor(java.util.UUID.class, String.class);
-            return constructor.newInstance(uuid, name);
+            return AuthlibAdapter.createGameProfile(uuid, name);
         } catch (Exception e) {
             LOGGER.warning("XiSessionService: Failed to create GameProfile: " + e.getMessage());
             return null;
@@ -536,12 +542,12 @@ public class XiSessionService {
      * @return 游戏档案名称
      */
     private String getProfileNameWithReflection(Object profile) {
-        try {
-            return (String) profile.getClass().getMethod("getName").invoke(profile);
-        } catch (Exception e) {
-            LOGGER.warning("XiSessionService: Exception getting profile name: " + e.getMessage());
-            return "unknown";
+        String name = AuthlibAdapter.extractName(profile);
+        if (name != null) {
+            return name;
         }
+        LOGGER.warning("XiSessionService: Exception getting profile name: unsupported auth result type");
+        return "unknown";
     }
 
     /**

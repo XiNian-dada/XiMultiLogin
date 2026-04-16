@@ -22,6 +22,8 @@ login:
   cracked: "&e登录成功（盗版模式）：欢迎，{player}！"
   # 严格认证失败（玩家被锁定到某种认证方式但验证失败）
   strict_auth_failed: "&c认证失败：您被锁定使用 {provider} 认证，但验证失败！"
+  # 同 ID 多鉴权冲突
+  provider_conflict: "&c登录失败：检测到同 ID 多鉴权冲突。当前锁定鉴权：{locked_provider}，同时命中的鉴权方式：{providers}"
   # 所有认证方式都失败
   all_providers_failed: "&c认证失败：所有认证方式均无法验证您的身份！"
   # Mojang 认证失败

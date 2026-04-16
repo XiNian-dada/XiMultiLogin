@@ -1,5 +1,7 @@
 package com.Leeinx.ximultilogin.reflection;
 
+import com.Leeinx.ximultilogin.auth.AuthlibAdapter;
+
 import org.bukkit.Bukkit;
 
 import java.lang.reflect.*;
@@ -369,26 +371,39 @@ public class XiReflection {
 
     private static Object invokeAdaptedSessionMethod(Object targetService, Method method, Object[] args) throws Exception {
         try {
-            Method targetMethod = findMethodLoose(targetService.getClass(), method.getName(), args == null ? 0 : args.length);
+            if (!"hasJoinedServer".equals(method.getName())) {
+                Object originalSessionService = resolveOriginalSessionService(targetService);
+                if (originalSessionService == null) {
+                    LOGGER.severe("XiReflection: Original session service unavailable for delegated call: " + method.getName());
+                    throw new NoSuchMethodException(method.getName());
+                }
+                return invokeDelegateMethod(originalSessionService, method, args);
+            }
+
+            Method targetMethod = resolveHasJoinedServerMethod(targetService.getClass(), args);
 
             if (targetMethod != null) {
                 targetMethod.setAccessible(true);
                 try {
-                    return targetMethod.invoke(targetService, args);
+                    Object result = targetMethod.invoke(targetService, args);
+                    return AuthlibAdapter.adaptReturnValue(result, method.getReturnType());
                 } catch (IllegalArgumentException e) {
                     LOGGER.info("XiReflection: Parameter type mismatch, trying smart adaptation...");
 
                     if (method.getName().equals("hasJoinedServer") && args != null && args.length == 3) {
                         try {
                             Object firstArg = args[0];
-                            Method getNameMethod = firstArg.getClass().getMethod("getName");
-                            String username = (String) getNameMethod.invoke(firstArg);
+                            String username = AuthlibAdapter.extractName(firstArg);
+                            if (username == null) {
+                                throw new IllegalArgumentException("Unable to extract username from " + firstArg.getClass().getName());
+                            }
                             Object[] adaptedArgs = new Object[]{username, args[1], args[2]};
-                            Method stringVersionMethod = findMethodLoose(targetService.getClass(), "hasJoinedServer", 3);
+                            Method stringVersionMethod = resolveStringHasJoinedServerMethod(targetService.getClass());
 
                             if (stringVersionMethod != null) {
                                 stringVersionMethod.setAccessible(true);
-                                return stringVersionMethod.invoke(targetService, adaptedArgs);
+                                Object result = stringVersionMethod.invoke(targetService, adaptedArgs);
+                                return AuthlibAdapter.adaptReturnValue(result, method.getReturnType());
                             }
                         } catch (Exception ex) {
                             LOGGER.warning("XiReflection: Smart adaptation failed: " + ex.getMessage());
@@ -406,6 +421,108 @@ public class XiReflection {
             e.printStackTrace();
             throw e;
         }
+    }
+
+    private static Method resolveHasJoinedServerMethod(Class<?> targetClass, Object[] args) {
+        if (args == null || args.length != 3) {
+            return findMethodLoose(targetClass, "hasJoinedServer", args == null ? 0 : args.length);
+        }
+
+        if (args[0] instanceof String) {
+            Method stringMethod = resolveStringHasJoinedServerMethod(targetClass);
+            if (stringMethod != null) {
+                return stringMethod;
+            }
+        }
+
+        Method objectMethod = resolveProfileHasJoinedServerMethod(targetClass);
+        if (objectMethod != null) {
+            return objectMethod;
+        }
+
+        Method stringMethod = resolveStringHasJoinedServerMethod(targetClass);
+        if (stringMethod != null) {
+            return stringMethod;
+        }
+
+        return findMethodLoose(targetClass, "hasJoinedServer", 3);
+    }
+
+    private static Method resolveStringHasJoinedServerMethod(Class<?> targetClass) {
+        return findMethodByTypeNames(
+                targetClass,
+                "hasJoinedServer",
+                new String[]{"java.lang.String", "java.lang.String", "java.net.InetAddress"}
+        );
+    }
+
+    private static Method resolveProfileHasJoinedServerMethod(Class<?> targetClass) {
+        return findMethodByTypeNames(
+                targetClass,
+                "hasJoinedServer",
+                new String[]{"java.lang.Object", "java.lang.String", "java.net.InetAddress"}
+        );
+    }
+
+    private static Method findMethodByTypeNames(Class<?> clazz, String methodName, String[] parameterTypeNames) {
+        Class<?> current = clazz;
+        while (current != null && current != Object.class) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getName().equals(methodName) && matchesParameterTypes(method, parameterTypeNames)) {
+                    return method;
+                }
+            }
+            current = current.getSuperclass();
+        }
+
+        for (Method method : clazz.getMethods()) {
+            if (method.getName().equals(methodName) && matchesParameterTypes(method, parameterTypeNames)) {
+                return method;
+            }
+        }
+        return null;
+    }
+
+    private static boolean matchesParameterTypes(Method method, String[] parameterTypeNames) {
+        Class<?>[] parameterTypes = method.getParameterTypes();
+        if (parameterTypes.length != parameterTypeNames.length) {
+            return false;
+        }
+
+        for (int i = 0; i < parameterTypes.length; i++) {
+            if (!parameterTypes[i].getName().equals(parameterTypeNames[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Object resolveOriginalSessionService(Object targetService) {
+        try {
+            Method getter = targetService.getClass().getMethod("getOriginalSessionService");
+            getter.setAccessible(true);
+            return getter.invoke(targetService);
+        } catch (Exception e) {
+            LOGGER.warning("XiReflection: Failed to resolve original session service: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static Object invokeDelegateMethod(Object delegate, Method interfaceMethod, Object[] args) throws Exception {
+        Method delegateMethod;
+        try {
+            delegateMethod = delegate.getClass().getMethod(interfaceMethod.getName(), interfaceMethod.getParameterTypes());
+        } catch (NoSuchMethodException ignored) {
+            delegateMethod = findMethodLoose(delegate.getClass(), interfaceMethod.getName(), args == null ? 0 : args.length);
+        }
+
+        if (delegateMethod == null) {
+            throw new NoSuchMethodException(interfaceMethod.getName());
+        }
+
+        delegateMethod.setAccessible(true);
+        Object result = delegateMethod.invoke(delegate, args);
+        return AuthlibAdapter.adaptReturnValue(result, interfaceMethod.getReturnType());
     }
 
     private static boolean shouldReplaceRecordComponent(Class<?> componentType, Class<?> sessionType, String componentName, String sessionFieldName, Object value, Object currentSessionValue) {

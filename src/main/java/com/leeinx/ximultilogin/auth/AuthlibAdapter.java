@@ -105,7 +105,8 @@ public final class AuthlibAdapter {
                 return null;
             }
 
-            Object wrapped = wrapGameProfile(profile, value);
+            Object template = isGameProfileObject(value) ? null : value;
+            Object wrapped = wrapGameProfile(profile, template);
             if (wrapped != null && expectedType.isInstance(wrapped)) {
                 return wrapped;
             }

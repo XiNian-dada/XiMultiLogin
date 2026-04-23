@@ -113,6 +113,34 @@ public final class AuthlibAdapter {
             return null;
         }
 
+        if (matchesClassName(expectedType, PROPERTY_CLASS)) {
+            if (matchesClassName(value.getClass(), PROPERTY_CLASS)) {
+                return value;
+            }
+            return findProperty(value, "textures");
+        }
+
+        if (Optional.class.isAssignableFrom(expectedType)) {
+            if (value instanceof Optional) {
+                return value;
+            }
+
+            Object profile = extractGameProfile(value);
+            if (profile == null) {
+                return Optional.empty();
+            }
+
+            Object wrapped = wrapGameProfile(profile, value);
+            return Optional.of(wrapped != null ? wrapped : profile);
+        }
+
+        if (java.util.concurrent.CompletableFuture.class.isAssignableFrom(expectedType)) {
+            if (value instanceof java.util.concurrent.CompletableFuture) {
+                return value;
+            }
+            return java.util.concurrent.CompletableFuture.completedFuture(value);
+        }
+
         return value;
     }
 
@@ -127,6 +155,9 @@ public final class AuthlibAdapter {
         if (sourceProfile == null || targetProfile == null) {
             return;
         }
+        if (sourceProfile == targetProfile) {
+            return;
+        }
 
         Object sourceProperties = getPropertyContainer(sourceProfile);
         Object targetProperties = getPropertyContainer(targetProfile);
@@ -134,14 +165,52 @@ public final class AuthlibAdapter {
             return;
         }
 
-        clearPropertyContainer(targetProperties);
+        List<Object> copiedProperties = new ArrayList<Object>();
         for (Object property : getPropertyValues(sourceProperties)) {
+            if (property != null) {
+                copiedProperties.add(property);
+            }
+        }
+        if (copiedProperties.isEmpty()) {
+            return;
+        }
+
+        clearPropertyContainer(targetProperties);
+        for (Object property : copiedProperties) {
             String propertyName = readString(property, "getName", "name");
             if (propertyName == null) {
                 continue;
             }
             putProperty(targetProperties, propertyName, property);
         }
+    }
+
+    public static boolean hasProperty(Object authResult, String propertyName) {
+        return findProperty(authResult, propertyName) != null;
+    }
+
+    public static Object findProperty(Object authResult, String propertyName) {
+        if (authResult == null || propertyName == null) {
+            return null;
+        }
+
+        Object profile = extractGameProfile(authResult);
+        if (profile == null) {
+            return null;
+        }
+
+        Object properties = getPropertyContainer(profile);
+        if (properties == null) {
+            return null;
+        }
+
+        for (Object property : getPropertyValues(properties)) {
+            String currentName = readString(property, "getName", "name");
+            if (propertyName.equals(currentName)) {
+                return property;
+            }
+        }
+        return null;
     }
 
     public static void applyJsonProperties(Object target, JsonArray jsonProperties) {
@@ -604,6 +673,11 @@ public final class AuthlibAdapter {
             return null;
         }
         visited.add(authResult);
+
+        if (authResult instanceof Optional) {
+            Optional<?> optional = (Optional<?>) authResult;
+            return optional.isPresent() ? extractGameProfile(optional.get(), visited) : null;
+        }
 
         if (isGameProfileObject(authResult)) {
             return authResult;

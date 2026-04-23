@@ -9,7 +9,9 @@ import org.bukkit.Bukkit;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,6 +23,7 @@ import java.util.logging.Logger;
 public class XiSessionService {
 
     private static final Logger LOGGER = Bukkit.getLogger();
+    private static final long PROFILE_PROPERTY_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(10);
 
     private enum ProviderAuthStatus {
         SUCCESS,
@@ -60,8 +63,23 @@ public class XiSessionService {
         }
     }
 
+    private static final class CachedProfile {
+        private final Object profile;
+        private final long cachedAt;
+
+        private CachedProfile(Object profile) {
+            this.profile = profile;
+            this.cachedAt = System.currentTimeMillis();
+        }
+
+        private boolean isExpired(long now) {
+            return now - cachedAt > PROFILE_PROPERTY_CACHE_TTL_MS;
+        }
+    }
+
     private final List<AuthProvider> providers;
     private final java.util.Map<String, AuthProvider> providerMap;
+    private final java.util.Map<String, CachedProfile> authenticatedProfileCache;
     private final Object originalSessionService;
     private final IdentityGuard identityGuard;
     private final ConfigManager configManager;
@@ -76,6 +94,7 @@ public class XiSessionService {
         this.loginListener = loginListener;
         this.providers = new ArrayList<>();
         this.providerMap = new java.util.HashMap<>();
+        this.authenticatedProfileCache = new ConcurrentHashMap<>();
         this.authExecutor = Executors.newFixedThreadPool(
                 Math.max(4, Runtime.getRuntime().availableProcessors()),
                 r -> {
@@ -474,6 +493,147 @@ public class XiSessionService {
                 .whenComplete((result, throwable) -> scheduledFuture.cancel(false));
     }
 
+    public Object preserveAuthenticatedProfileProperties(String methodName, Object[] args, Object result) {
+        if (!isProfilePropertyMethod(methodName)) {
+            return result;
+        }
+
+        CachedProfile cachedProfile = findCachedProfile(args, result);
+        if (cachedProfile == null) {
+            return result;
+        }
+
+        if (args != null) {
+            for (Object arg : args) {
+                AuthlibAdapter.copyProperties(cachedProfile.profile, arg);
+            }
+        }
+
+        if ("getPackedTextures".equals(methodName)) {
+            Object cachedTextures = AuthlibAdapter.findProperty(cachedProfile.profile, "textures");
+            return cachedTextures != null ? cachedTextures : result;
+        }
+
+        if ("getTextures".equals(methodName) && result == null) {
+            return null;
+        }
+
+        if (result != null) {
+            AuthlibAdapter.copyProperties(cachedProfile.profile, result);
+            return result;
+        }
+
+        return cachedProfile.profile;
+    }
+
+    private boolean isProfilePropertyMethod(String methodName) {
+        return "fillProfileProperties".equals(methodName)
+                || "fetchProfile".equals(methodName)
+                || "getPackedTextures".equals(methodName)
+                || "getTextures".equals(methodName);
+    }
+
+    private CachedProfile findCachedProfile(Object[] args, Object result) {
+        CachedProfile cachedProfile = findCachedProfile(result);
+        if (cachedProfile != null) {
+            return cachedProfile;
+        }
+
+        if (args == null) {
+            return null;
+        }
+
+        for (Object arg : args) {
+            cachedProfile = findCachedProfile(arg);
+            if (cachedProfile != null) {
+                return cachedProfile;
+            }
+        }
+        return null;
+    }
+
+    private CachedProfile findCachedProfile(Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof java.util.UUID) {
+            return getCachedProfile("uuid:" + value.toString());
+        }
+
+        Object profile = AuthlibAdapter.extractGameProfile(value);
+        if (profile == null) {
+            return null;
+        }
+
+        java.util.UUID uuid = AuthlibAdapter.extractUuid(profile);
+        if (uuid != null) {
+            CachedProfile cachedProfile = getCachedProfile("uuid:" + uuid.toString());
+            if (cachedProfile != null) {
+                return cachedProfile;
+            }
+        }
+
+        String name = AuthlibAdapter.extractName(profile);
+        if (name != null) {
+            return getCachedProfile("name:" + normalizeProfileName(name));
+        }
+        return null;
+    }
+
+    private CachedProfile getCachedProfile(String key) {
+        CachedProfile cachedProfile = authenticatedProfileCache.get(key);
+        if (cachedProfile == null) {
+            return null;
+        }
+
+        long now = System.currentTimeMillis();
+        if (cachedProfile.isExpired(now)) {
+            authenticatedProfileCache.remove(key, cachedProfile);
+            return null;
+        }
+        return cachedProfile;
+    }
+
+    private Object cacheAuthenticatedProfile(Object profile, String providerName) {
+        if (profile == null || !AuthlibAdapter.hasProperty(profile, "textures")) {
+            return profile;
+        }
+
+        Object gameProfile = AuthlibAdapter.extractGameProfile(profile);
+        if (gameProfile == null) {
+            return profile;
+        }
+
+        CachedProfile cachedProfile = new CachedProfile(gameProfile);
+        java.util.UUID uuid = AuthlibAdapter.extractUuid(gameProfile);
+        if (uuid != null) {
+            authenticatedProfileCache.put("uuid:" + uuid.toString(), cachedProfile);
+        }
+
+        String name = AuthlibAdapter.extractName(gameProfile);
+        if (name != null) {
+            authenticatedProfileCache.put("name:" + normalizeProfileName(name), cachedProfile);
+        }
+
+        cleanupExpiredCachedProfiles();
+        LOGGER.info("XiSessionService: Cached authenticated profile textures for " + name + " (provider: " + providerName + ")");
+        return profile;
+    }
+
+    private void cleanupExpiredCachedProfiles() {
+        long now = System.currentTimeMillis();
+        for (java.util.Map.Entry<String, CachedProfile> entry : authenticatedProfileCache.entrySet()) {
+            if (entry.getValue().isExpired(now)) {
+                authenticatedProfileCache.remove(entry.getKey(), entry.getValue());
+            }
+        }
+    }
+
+    private String normalizeProfileName(String name) {
+        return name.toLowerCase(Locale.ROOT);
+    }
+
     private Object createTemporaryProfile(String username) {
         try {
             java.util.UUID uuid = identityGuard.getUUID(username);
@@ -553,33 +713,33 @@ public class XiSessionService {
 
             if (name == null || incomingUuid == null) {
                 LOGGER.warning("XiSessionService: Missing profile identity data during async UUID takeover");
-                return CompletableFuture.completedFuture(profile);
+                return CompletableFuture.completedFuture(cacheAuthenticatedProfile(profile, providerName));
             }
 
             return identityGuard.getOrCreateIdentityAsync(name, incomingUuid, providerName)
                     .thenApply(fixedUuid -> {
                         if (fixedUuid == null) {
                             LOGGER.warning("XiSessionService: Failed to get fixed UUID for " + name);
-                            return profile;
+                            return cacheAuthenticatedProfile(profile, providerName);
                         }
 
                         if (fixedUuid.equals(incomingUuid)) {
                             LOGGER.info("XiSessionService: UUID already fixed for " + name + ": " + fixedUuid);
-                            return profile;
+                            return cacheAuthenticatedProfile(profile, providerName);
                         }
 
                         try {
                             Object newProfile = AuthlibAdapter.replaceIdentity(profile, fixedUuid, name);
                             LOGGER.info("XiSessionService: UUID taken over for " + name + ": " + incomingUuid + " -> " + fixedUuid);
-                            return newProfile;
+                            return cacheAuthenticatedProfile(newProfile, providerName);
                         } catch (Exception e) {
                             LOGGER.warning("XiSessionService: Exception rebuilding auth result: " + e.getMessage());
-                            return profile;
+                            return cacheAuthenticatedProfile(profile, providerName);
                         }
                     });
         } catch (Exception e) {
             LOGGER.warning("XiSessionService: Exception taking over UUID: " + e.getMessage());
-            return CompletableFuture.completedFuture(profile);
+            return CompletableFuture.completedFuture(cacheAuthenticatedProfile(profile, providerName));
         }
     }
 
@@ -614,6 +774,7 @@ public class XiSessionService {
     }
 
     public void close() {
+        authenticatedProfileCache.clear();
         authExecutor.shutdownNow();
         timeoutScheduler.shutdownNow();
     }

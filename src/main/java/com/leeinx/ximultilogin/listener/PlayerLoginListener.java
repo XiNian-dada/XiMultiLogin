@@ -121,6 +121,18 @@ public class PlayerLoginListener implements Listener {
         successfulAuthProviders.remove(username);
     }
 
+    public void recordAuthUnavailable(String username, String provider) {
+        LOGGER.warning("PlayerLoginListener: Recording auth service unavailable for " + username + " (provider: " + provider + ")");
+        failedAuthReasons.put(username, "provider_unavailable");
+        if (provider != null && !provider.trim().isEmpty()) {
+            failedAuthProviders.put(username, provider);
+        } else {
+            failedAuthProviders.remove(username);
+        }
+        failedAuthConflictProviders.remove(username);
+        successfulAuthProviders.remove(username);
+    }
+
     public void recordProviderConflict(String username, String lockedProvider, String conflictProviders) {
         LOGGER.warning("PlayerLoginListener: Recording provider conflict for " + username
                 + " (locked: " + lockedProvider + ", conflicts: " + conflictProviders + ")");
@@ -180,6 +192,16 @@ public class PlayerLoginListener implements Listener {
         }
         if ("all_providers_failed".equals(reason)) {
             return messageManager.getMessage("login.all_providers_failed");
+        }
+        if ("provider_unavailable".equals(reason)) {
+            String unavailableProvider = provider != null && !provider.trim().isEmpty() ? provider : "认证服务";
+            if (messageManager.getMessages().contains("login.provider_unavailable")) {
+                return messageManager.getMessage("login.provider_unavailable", "provider", unavailableProvider);
+            }
+            return messageManager.getMessage(
+                    "login.failed",
+                    "reason", unavailableProvider + " 暂时无法验证您的身份，请稍后重试"
+            );
         }
         if ("provider_conflict".equals(reason)) {
             String lockedProvider = provider != null && !provider.trim().isEmpty() ? provider : "未锁定";

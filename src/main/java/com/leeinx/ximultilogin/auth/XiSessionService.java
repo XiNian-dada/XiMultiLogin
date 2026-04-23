@@ -22,17 +22,41 @@ public class XiSessionService {
 
     private static final Logger LOGGER = Bukkit.getLogger();
 
+    private enum ProviderAuthStatus {
+        SUCCESS,
+        FAILED,
+        UNAVAILABLE
+    }
+
     private static final class ProviderAuthResult {
         private final AuthProvider provider;
         private final Object profile;
+        private final ProviderAuthStatus status;
 
-        private ProviderAuthResult(AuthProvider provider, Object profile) {
+        private ProviderAuthResult(AuthProvider provider, Object profile, ProviderAuthStatus status) {
             this.provider = provider;
             this.profile = profile;
+            this.status = status;
+        }
+
+        private static ProviderAuthResult success(AuthProvider provider, Object profile) {
+            return new ProviderAuthResult(provider, profile, ProviderAuthStatus.SUCCESS);
+        }
+
+        private static ProviderAuthResult failed(AuthProvider provider) {
+            return new ProviderAuthResult(provider, null, ProviderAuthStatus.FAILED);
+        }
+
+        private static ProviderAuthResult unavailable(AuthProvider provider) {
+            return new ProviderAuthResult(provider, null, ProviderAuthStatus.UNAVAILABLE);
         }
 
         private boolean isSuccess() {
-            return profile != null;
+            return status == ProviderAuthStatus.SUCCESS && profile != null;
+        }
+
+        private boolean isUnavailable() {
+            return status == ProviderAuthStatus.UNAVAILABLE;
         }
     }
 
@@ -188,6 +212,14 @@ public class XiSessionService {
                         return finalizeSuccessfulAuthentication(username, firstSuccessfulResult);
                     }
 
+                    List<ProviderAuthResult> unavailableResults = getUnavailableResults(results);
+                    if (!unavailableResults.isEmpty()) {
+                        String unavailableProviders = joinProviderNames(unavailableResults);
+                        LOGGER.warning("XiSessionService: Authentication service unavailable for " + username
+                                + " (providers: " + unavailableProviders + ")");
+                        return deferAuthUnavailable(username, unavailableProviders);
+                    }
+
                     LOGGER.info("XiSessionService: All providers failed to authenticate " + username);
                     if (loginListener != null) {
                         loginListener.recordAuthFailure(username, "all_providers_failed", null);
@@ -224,6 +256,12 @@ public class XiSessionService {
                             return finalizeSuccessfulAuthentication(username, result);
                         }
 
+                        if (result.isUnavailable()) {
+                            LOGGER.warning("XiSessionService: Strict auth unavailable. Player locked to "
+                                    + storedAuthProvider + " but provider cannot be reached");
+                            return deferAuthUnavailable(username, storedAuthProvider);
+                        }
+
                         LOGGER.warning("XiSessionService: Strict auth FAILED. Player locked to " + storedAuthProvider + " but verification failed");
                         return deferAuthFailure(username, "strict_auth_failed", storedAuthProvider);
                     });
@@ -240,7 +278,7 @@ public class XiSessionService {
         return authenticateProvidersAsync(providersToCheck, username, serverId)
                 .thenCompose(results -> {
                     ProviderAuthResult lockedResult = results.isEmpty()
-                            ? new ProviderAuthResult(lockedProvider, null)
+                            ? ProviderAuthResult.failed(lockedProvider)
                             : results.get(0);
                     List<ProviderAuthResult> conflictingResults = getSuccessfulResults(results, lockedProvider.getName());
                     if (!conflictingResults.isEmpty()) {
@@ -255,34 +293,53 @@ public class XiSessionService {
                         return finalizeSuccessfulAuthentication(username, lockedResult);
                     }
 
+                    if (lockedResult.isUnavailable()) {
+                        LOGGER.warning("XiSessionService: Strict auth unavailable. Player locked to "
+                                + storedAuthProvider + " but provider cannot be reached");
+                        return deferAuthUnavailable(username, storedAuthProvider);
+                    }
+
                     LOGGER.warning("XiSessionService: Strict auth FAILED. Player locked to " + storedAuthProvider + " but verification failed");
                     return deferAuthFailure(username, "strict_auth_failed", storedAuthProvider);
                 });
     }
 
     private CompletableFuture<ProviderAuthResult> authenticateProviderAsync(AuthProvider provider, String username, String serverId) {
+        CompletableFuture<ProviderAuthResult> authFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                long providerStartTime = System.currentTimeMillis();
+                Object profile = provider.authenticate(username, serverId);
+                long providerEndTime = System.currentTimeMillis();
+                LOGGER.info("XiSessionService: Provider " + provider.getName() + " took " + (providerEndTime - providerStartTime) + "ms");
+                if (profile != null) {
+                    return ProviderAuthResult.success(provider, profile);
+                }
+                return ProviderAuthResult.failed(provider);
+            } catch (AuthProviderUnavailableException e) {
+                LOGGER.warning("XiSessionService: Provider " + provider.getName() + " unavailable: " + e.getMessage());
+                return ProviderAuthResult.unavailable(provider);
+            } catch (Exception e) {
+                LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + e.getMessage());
+                return ProviderAuthResult.failed(provider);
+            }
+        }, authExecutor);
+
         return withTimeout(
-                CompletableFuture.supplyAsync(() -> {
-                    try {
-                        long providerStartTime = System.currentTimeMillis();
-                        Object profile = provider.authenticate(username, serverId);
-                        long providerEndTime = System.currentTimeMillis();
-                        LOGGER.info("XiSessionService: Provider " + provider.getName() + " took " + (providerEndTime - providerStartTime) + "ms");
-                        return profile;
-                    } catch (Exception e) {
-                        LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + e.getMessage());
-                        return null;
-                    }
-                }, authExecutor),
+                authFuture,
                 5,
                 TimeUnit.SECONDS,
                 "XiSessionService: Provider " + provider.getName() + " timed out"
-        ).exceptionally(ex -> {
+        ).thenApply(result -> {
+            if (result == null) {
+                return ProviderAuthResult.unavailable(provider);
+            }
+            return result;
+        }).exceptionally(ex -> {
             if (ex != null && ex.getMessage() != null) {
                 LOGGER.warning("XiSessionService: Exception in provider " + provider.getName() + ": " + ex.getMessage());
             }
-            return null;
-        }).thenApply(profile -> new ProviderAuthResult(provider, profile));
+            return ProviderAuthResult.failed(provider);
+        });
     }
 
     private CompletableFuture<List<ProviderAuthResult>> authenticateProvidersAsync(
@@ -312,7 +369,7 @@ public class XiSessionService {
                 } catch (Exception ignored) {
                 }
                 if (result == null) {
-                    result = new ProviderAuthResult(providersToAuthenticate.get(i), null);
+                    result = ProviderAuthResult.failed(providersToAuthenticate.get(i));
                 }
                 results.add(result);
             }
@@ -332,6 +389,16 @@ public class XiSessionService {
             successfulResults.add(result);
         }
         return successfulResults;
+    }
+
+    private List<ProviderAuthResult> getUnavailableResults(List<ProviderAuthResult> results) {
+        List<ProviderAuthResult> unavailableResults = new ArrayList<>();
+        for (ProviderAuthResult result : results) {
+            if (result != null && result.isUnavailable()) {
+                unavailableResults.add(result);
+            }
+        }
+        return unavailableResults;
     }
 
     private ProviderAuthResult findFirstSuccessfulResult(List<ProviderAuthResult> results) {
@@ -355,6 +422,16 @@ public class XiSessionService {
         LOGGER.warning("XiSessionService: Deferring rejection to show custom kick message");
         if (loginListener != null) {
             loginListener.recordAuthFailure(username, reason, provider);
+            return CompletableFuture.completedFuture(createTemporaryProfile(username));
+        }
+        LOGGER.severe("XiSessionService: Login listener unavailable, failing closed for " + username);
+        return CompletableFuture.completedFuture(null);
+    }
+
+    private CompletableFuture<Object> deferAuthUnavailable(String username, String provider) {
+        LOGGER.warning("XiSessionService: Deferring rejection to show authentication service unavailable message");
+        if (loginListener != null) {
+            loginListener.recordAuthUnavailable(username, provider);
             return CompletableFuture.completedFuture(createTemporaryProfile(username));
         }
         LOGGER.severe("XiSessionService: Login listener unavailable, failing closed for " + username);

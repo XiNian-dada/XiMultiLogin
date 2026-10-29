@@ -1,11 +1,13 @@
 package com.Leeinx.ximultilogin.auth.providers;
 
+import com.Leeinx.ximultilogin.auth.AuthProviderUnavailableException;
 import com.Leeinx.ximultilogin.auth.AuthlibAdapter;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -118,9 +120,17 @@ public class YggdrasilAuthProvider extends BaseAuthProvider {
                 }
             } else if (responseCode == 204) {
                 info("204 No Content (Verify Failed)");
+            } else if (responseCode == 429 || responseCode >= 500) {
+                throw new AuthProviderUnavailableException(name + " authentication service returned HTTP " + responseCode, null);
             } else {
                 info("HTTP " + responseCode);
             }
+        } catch (AuthProviderUnavailableException e) {
+            warning("Authentication service unavailable: " + e.getMessage());
+            throw e;
+        } catch (IOException e) {
+            warning("Network Error: " + e.getMessage());
+            throw new AuthProviderUnavailableException(name + " authentication service unavailable", e);
         } catch (Exception e) {
             warning("Network/Parse Error: " + e.getMessage());
             e.printStackTrace();

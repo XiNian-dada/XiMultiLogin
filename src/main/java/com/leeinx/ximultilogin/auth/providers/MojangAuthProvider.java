@@ -1,6 +1,9 @@
 package com.Leeinx.ximultilogin.auth.providers;
 
+import com.Leeinx.ximultilogin.auth.AuthProviderUnavailableException;
 import com.Leeinx.ximultilogin.auth.AuthlibAdapter;
+
+import java.lang.reflect.InvocationTargetException;
 
 public class MojangAuthProvider extends BaseAuthProvider {
 
@@ -27,6 +30,9 @@ public class MojangAuthProvider extends BaseAuthProvider {
                 info("Authentication failed for " + username);
             }
             return profile;
+        } catch (AuthProviderUnavailableException e) {
+            warning("Authentication service unavailable: " + e.getMessage());
+            throw e;
         } catch (Exception e) {
             warning("Exception during authentication: " + e.getMessage());
             return null;
@@ -97,9 +103,56 @@ public class MojangAuthProvider extends BaseAuthProvider {
                 }
             }
         } catch (Exception e) {
-            warning("Exception calling hasJoinedServer: " + e.getMessage());
+            Throwable rootCause = unwrapReflectionException(e);
+            if (isServiceUnavailable(rootCause)) {
+                warning("Mojang session service unavailable: " + describeThrowable(rootCause));
+                throw new AuthProviderUnavailableException("Mojang session service unavailable", rootCause);
+            }
+            warning("Exception calling hasJoinedServer: " + describeThrowable(rootCause));
             e.printStackTrace();
             return null;
         }
+    }
+
+    private Throwable unwrapReflectionException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current instanceof InvocationTargetException
+                && ((InvocationTargetException) current).getTargetException() != null) {
+            current = ((InvocationTargetException) current).getTargetException();
+        }
+        return current == null ? throwable : current;
+    }
+
+    private boolean isServiceUnavailable(Throwable throwable) {
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth++ < 8) {
+            String className = current.getClass().getName();
+            String simpleName = current.getClass().getSimpleName();
+            if ("AuthenticationUnavailableException".equals(simpleName)
+                    || "com.mojang.authlib.exceptions.AuthenticationUnavailableException".equals(className)) {
+                return true;
+            }
+            if (current instanceof java.net.SocketTimeoutException
+                    || current instanceof java.net.ConnectException
+                    || current instanceof java.net.UnknownHostException
+                    || current instanceof java.net.NoRouteToHostException
+                    || current instanceof javax.net.ssl.SSLException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String describeThrowable(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown";
+        }
+        String message = throwable.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return throwable.getClass().getName();
+        }
+        return throwable.getClass().getName() + ": " + message;
     }
 }

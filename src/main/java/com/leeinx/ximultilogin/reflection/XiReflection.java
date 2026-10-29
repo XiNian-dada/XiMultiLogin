@@ -377,7 +377,20 @@ public class XiReflection {
                     LOGGER.severe("XiReflection: Original session service unavailable for delegated call: " + method.getName());
                     throw new NoSuchMethodException(method.getName());
                 }
-                return invokeDelegateMethod(originalSessionService, method, args);
+                preserveAuthenticatedProfileProperties(targetService, method.getName(), args, null);
+                try {
+                    Object result = invokeDelegateMethod(originalSessionService, method, args);
+                    Object preservedResult = preserveAuthenticatedProfileProperties(targetService, method.getName(), args, result);
+                    return AuthlibAdapter.adaptReturnValue(preservedResult, method.getReturnType());
+                } catch (Exception e) {
+                    Object fallbackResult = preserveAuthenticatedProfileProperties(targetService, method.getName(), args, null);
+                    if (fallbackResult != null && method.getReturnType() != Void.TYPE) {
+                        LOGGER.warning("XiReflection: Delegated profile method failed, using cached profile properties for "
+                                + method.getName() + ": " + e.getMessage());
+                        return AuthlibAdapter.adaptReturnValue(fallbackResult, method.getReturnType());
+                    }
+                    throw e;
+                }
             }
 
             Method targetMethod = resolveHasJoinedServerMethod(targetService.getClass(), args);
@@ -505,6 +518,23 @@ public class XiReflection {
         } catch (Exception e) {
             LOGGER.warning("XiReflection: Failed to resolve original session service: " + e.getMessage());
             return null;
+        }
+    }
+
+    private static Object preserveAuthenticatedProfileProperties(Object targetService, String methodName, Object[] args, Object result) {
+        try {
+            Method preserver = targetService.getClass().getMethod(
+                    "preserveAuthenticatedProfileProperties",
+                    String.class,
+                    Object[].class,
+                    Object.class
+            );
+            preserver.setAccessible(true);
+            return preserver.invoke(targetService, methodName, args, result);
+        } catch (Exception e) {
+            LOGGER.warning("XiReflection: Failed to preserve authenticated profile properties for "
+                    + methodName + ": " + e.getMessage());
+            return result;
         }
     }
 

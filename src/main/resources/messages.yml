@@ -21,9 +21,13 @@ login:
   # 盗版玩家登录
   cracked: "&e登录成功（盗版模式）：欢迎，{player}！"
   # 严格认证失败（玩家被锁定到某种认证方式但验证失败）
-  strict_auth_failed: "&c认证失败：您被锁定使用 {provider} 认证，但验证失败！"
+  strict_auth_failed: "&c认证失败：您被锁定使用 {provider} 认证！"
+  # 同 ID 多鉴权冲突
+  provider_conflict: "&c登录失败：检测到同 ID 多鉴权冲突。当前锁定鉴权：{locked_provider}，同时命中的鉴权方式：{providers}"
   # 所有认证方式都失败
   all_providers_failed: "&c认证失败：所有认证方式均无法验证您的身份！"
+  # 认证服务不可用（Mojang/Yggdrasil 网络不可达、超时或上游临时故障）
+  provider_unavailable: "&c认证服务暂时不可用：{provider} 暂时无法验证您的身份，请稍后重试！"
   # Mojang 认证失败
   mojang_failed: "&cMojang 认证失败：请检查您的正版账户状态！"
   # Yggdrasil 认证失败

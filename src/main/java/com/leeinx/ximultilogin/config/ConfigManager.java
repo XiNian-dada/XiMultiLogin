@@ -283,6 +283,15 @@ import java.util.logging.Logger;
     public boolean isAllowCracked() {
         return config.getBoolean("allow_cracked", false);
     }
+
+    /**
+     * 鑾峰彇鏄惁寮€鍚悓 ID 澶氳璇佸啿绐佹嫤鎴?
+     *
+     * @return 鏄惁寮€鍚悓 ID 澶氳璇佸啿绐佹嫤鎴?
+     */
+    public boolean isBlockSameIdConflict() {
+        return config.getBoolean("security.block_same_id_conflict", false);
+    }
     
     /**
      * 设置是否允许盗版玩家加入

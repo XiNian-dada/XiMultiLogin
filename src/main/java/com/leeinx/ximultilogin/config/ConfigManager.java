@@ -20,6 +20,7 @@ import java.util.logging.Logger;
 
         private static final Logger LOGGER = Bukkit.getLogger();
         private final JavaPlugin plugin;
+        private final File customDataFolder;
         private File configFile;
         private FileConfiguration config;
         private boolean debugMode;
@@ -30,7 +31,18 @@ import java.util.logging.Logger;
          * @param plugin 插件实例
          */
         public ConfigManager(JavaPlugin plugin) {
+            this(plugin, null);
+        }
+
+        /**
+         * 构造 ConfigManager（支持自定义配置目录，用于测试）
+         *
+         * @param plugin           插件实例
+         * @param customDataFolder 自定义配置目录
+         */
+        public ConfigManager(JavaPlugin plugin, File customDataFolder) {
             this.plugin = plugin;
+            this.customDataFolder = customDataFolder;
             loadConfig();
             this.debugMode = config.getBoolean("debug", false);
         }
@@ -78,10 +90,13 @@ import java.util.logging.Logger;
      * 加载配置
      */
     public void loadConfig() {
-        configFile = new File(plugin.getDataFolder(), "config.yml");
+        File dataDir = customDataFolder != null ? customDataFolder : (plugin != null ? plugin.getDataFolder() : new File("."));
+        configFile = new File(dataDir, "config.yml");
         if (!configFile.exists()) {
-            plugin.saveResource("config.yml", false);
-            info("Created default config.yml");
+            if (plugin != null) {
+                plugin.saveResource("config.yml", false);
+                info("Created default config.yml");
+            }
         }
         config = YamlConfiguration.loadConfiguration(configFile);
         this.debugMode = config.getBoolean("debug", false);
@@ -285,9 +300,9 @@ import java.util.logging.Logger;
     }
 
     /**
-     * 鑾峰彇鏄惁寮€鍚悓 ID 澶氳璇佸啿绐佹嫤鎴?
+     * 获取是否开启同 ID 多认证冲突拦截
      *
-     * @return 鏄惁寮€鍚悓 ID 澶氳璇佸啿绐佹嫤鎴?
+     * @return 是否开启同 ID 多认证冲突拦截
      */
     public boolean isBlockSameIdConflict() {
         return config.getBoolean("security.block_same_id_conflict", false);

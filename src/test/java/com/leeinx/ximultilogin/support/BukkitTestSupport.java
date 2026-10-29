@@ -14,7 +14,10 @@ import static org.mockito.Mockito.when;
 public abstract class BukkitTestSupport {
 
     @BeforeClass
-    public static void installBukkitServer() {
+    public static synchronized void installBukkitServer() {
+        if (Bukkit.getServer() != null) {
+            return;
+        }
         Server server = Mockito.mock(Server.class);
         BukkitScheduler scheduler = Mockito.mock(BukkitScheduler.class);
 

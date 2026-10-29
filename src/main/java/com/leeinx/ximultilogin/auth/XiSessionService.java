@@ -20,6 +20,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.logging.Logger;
 
+/**
+ * 验证链管理器
+ * 根据配置的验证链顺序依次尝试验证
+ */
 public class XiSessionService {
 
     private static final Logger LOGGER = Bukkit.getLogger();
@@ -87,6 +91,14 @@ public class XiSessionService {
     private final ExecutorService authExecutor;
     private final ScheduledExecutorService timeoutScheduler;
 
+    /**
+     * 构造 XiSessionService
+     * 
+     * @param originalSessionService 原始的 SessionService 实例
+     * @param configManager          配置管理器
+     * @param identityGuard          身份守护者
+     * @param loginListener          登录监听器
+     */
     public XiSessionService(Object originalSessionService, ConfigManager configManager, IdentityGuard identityGuard, PlayerLoginListener loginListener) {
         this.originalSessionService = originalSessionService;
         this.identityGuard = identityGuard;
@@ -142,6 +154,12 @@ public class XiSessionService {
         }
     }
 
+    /**
+     * 根据配置创建验证提供者
+     * 
+     * @param providerConfig 提供者配置
+     * @return 创建的验证提供者
+     */
     private AuthProvider createProvider(ConfigManager.ProviderConfig providerConfig) {
         String type = providerConfig.getType().toUpperCase();
 
@@ -213,6 +231,13 @@ public class XiSessionService {
                 });
     }
 
+    /**
+     * 尝试所有认证提供者（异步）
+     * 
+     * @param username 玩家名称
+     * @param serverId 服务器唯一标识符
+     * @return 验证结果的 CompletableFuture
+     */
     private CompletableFuture<Object> tryAllProvidersAsync(String username, String serverId) {
         LOGGER.info("XiSessionService: New player detected. Trying all providers...");
 
@@ -634,6 +659,12 @@ public class XiSessionService {
         return name.toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * 为盗版玩家创建临时GameProfile
+     * 
+     * @param username 玩家名称
+     * @return 临时GameProfile，创建失败返回 null
+     */
     private Object createTemporaryProfile(String username) {
         try {
             java.util.UUID uuid = identityGuard.getUUID(username);
@@ -661,6 +692,13 @@ public class XiSessionService {
         }
     }
 
+    /**
+     * 使用反射验证身份并接管UUID
+     * 
+     * @param profile      GameProfile 对象
+     * @param providerName 提供者名称
+     * @return 验证是否成功
+     */
     private boolean verifyIdentityWithReflection(Object profile, String providerName) {
         try {
             String name = AuthlibAdapter.extractName(profile);
@@ -676,6 +714,13 @@ public class XiSessionService {
         }
     }
 
+    /**
+     * 接管UUID并创建新的GameProfile
+     * 
+     * @param profile      原始GameProfile
+     * @param providerName 提供者名称
+     * @return 带有固定UUID的GameProfile
+     */
     private Object takeOverUUID(Object profile, String providerName) {
         try {
             String name = AuthlibAdapter.extractName(profile);
@@ -706,6 +751,13 @@ public class XiSessionService {
         }
     }
 
+    /**
+     * 异步接管UUID并创建新的GameProfile
+     * 
+     * @param profile      原始GameProfile
+     * @param providerName 提供者名称
+     * @return 带有固定UUID的GameProfile的 CompletableFuture
+     */
     private CompletableFuture<Object> takeOverUUIDAsync(Object profile, String providerName) {
         try {
             String name = AuthlibAdapter.extractName(profile);
@@ -743,6 +795,13 @@ public class XiSessionService {
         }
     }
 
+    /**
+     * 使用反射创建GameProfile
+     * 
+     * @param uuid UUID
+     * @param name 名称
+     * @return GameProfile对象
+     */
     private Object createGameProfile(java.util.UUID uuid, String name) {
         try {
             return AuthlibAdapter.createGameProfile(uuid, name);
@@ -761,14 +820,41 @@ public class XiSessionService {
         return "unknown";
     }
 
+    /**
+     * 获取原始的 SessionService
+     * 
+     * @return 原始 SessionService
+     */
     public Object getOriginalSessionService() {
         return originalSessionService;
     }
 
+    /**
+     * 获取验证提供者列表
+     * 
+     * @return 验证提供者列表
+     */
     public List<AuthProvider> getProviders() {
         return providers;
     }
 
+    /**
+     * 注册新的验证提供者（支持动态扩展或测试注入）
+     *
+     * @param provider 验证提供者
+     */
+    public void registerProvider(AuthProvider provider) {
+        if (provider != null) {
+            providers.add(provider);
+            providerMap.put(provider.getName(), provider);
+        }
+    }
+
+    /**
+     * 获取身份守护者
+     * 
+     * @return 身份守护者
+     */
     public IdentityGuard getIdentityGuard() {
         return identityGuard;
     }

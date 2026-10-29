@@ -14,25 +14,46 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Yggdrasil 协议认证提供者
+ * 用于支持第三方皮肤站（如 LittleSkin、Blessing Skin 等）
+ */
 public class YggdrasilAuthProvider extends BaseAuthProvider {
 
     private final String apiUrl;
     private final SkinCache skinCache;
 
+    /**
+     * 构造 YggdrasilAuthProvider
+     * 
+     * @param name    提供者名称
+     * @param apiUrl  第三方皮肤站 Yggdrasil API 地址
+     * @param enabled 是否启用
+     */
     public YggdrasilAuthProvider(String name, String apiUrl, boolean enabled) {
         super(name, enabled);
         this.apiUrl = apiUrl;
         this.skinCache = new SkinCache();
     }
 
+    /**
+     * 皮肤缓存类
+     * 缓存玩家皮肤属性，减少重复获取
+     */
     private static class SkinCache {
         private final ConcurrentHashMap<String, SkinData> cache;
-        private static final long CACHE_DURATION = 30 * 60 * 1000;
+        private static final long CACHE_DURATION = 30 * 60 * 1000; // 30分钟缓存
 
         SkinCache() {
             this.cache = new ConcurrentHashMap<String, SkinData>();
         }
 
+        /**
+         * 获取缓存的皮肤数据
+         * 
+         * @param key 缓存键 (username:provider)
+         * @return 皮肤数据，若不存在或已过期返回 null
+         */
         public SkinData get(String key) {
             SkinData data = cache.get(key);
             if (data != null && !data.isExpired()) {
@@ -42,10 +63,19 @@ public class YggdrasilAuthProvider extends BaseAuthProvider {
             return null;
         }
 
+        /**
+         * 缓存皮肤数据
+         * 
+         * @param key  缓存键 (username:provider)
+         * @param data 皮肤数据
+         */
         public void put(String key, SkinData data) {
             cache.put(key, data);
         }
 
+        /**
+         * 皮肤数据类
+         */
         public static class SkinData {
             private final JsonArray properties;
             private final long timestamp;
@@ -65,6 +95,13 @@ public class YggdrasilAuthProvider extends BaseAuthProvider {
         }
     }
 
+    /**
+     * 执行 Yggdrasil 认证
+     * 
+     * @param username 玩家名称
+     * @param serverId 服务器唯一标识符
+     * @return 认证成功返回包装后的 GameProfile，认证失败返回 null
+     */
     @Override
     public Object authenticate(String username, String serverId) {
         if (!enabled) {

@@ -5,15 +5,32 @@ import com.Leeinx.ximultilogin.auth.AuthlibAdapter;
 
 import java.lang.reflect.InvocationTargetException;
 
+/**
+ * Mojang 官方认证提供者
+ * 实现 Mojang 官方的验证流程
+ */
 public class MojangAuthProvider extends BaseAuthProvider {
 
     private final Object sessionService;
 
+    /**
+     * 构造 MojangAuthProvider
+     * 
+     * @param sessionService Minecraft 会话服务
+     * @param enabled        是否启用
+     */
     public MojangAuthProvider(Object sessionService, boolean enabled) {
         super("MOJANG", enabled);
         this.sessionService = sessionService;
     }
 
+    /**
+     * 执行 Mojang 官方认证
+     * 
+     * @param username 玩家名称
+     * @param serverId 服务器唯一标识符
+     * @return 认证成功返回 GameProfile，认证失败返回 null
+     */
     @Override
     public Object authenticate(String username, String serverId) {
         if (!enabled) {
@@ -23,6 +40,7 @@ public class MojangAuthProvider extends BaseAuthProvider {
 
         try {
             info("Authenticating " + username + " with Mojang");
+            // 使用反射调用 hasJoinedServer 方法
             Object profile = callHasJoinedServer(sessionService, username, serverId, null);
             if (profile != null) {
                 info("Authentication successful for " + username);
@@ -39,11 +57,22 @@ public class MojangAuthProvider extends BaseAuthProvider {
         }
     }
 
+    /**
+     * 使用反射调用 hasJoinedServer 方法
+     * 智能匹配不同的方法签名
+     * 
+     * @param sessionService Minecraft 会话服务
+     * @param username       玩家名称
+     * @param serverId       服务器唯一标识符
+     * @param ipAddress      IP地址
+     * @return 认证成功返回 GameProfile，认证失败返回 null
+     */
     private Object callHasJoinedServer(Object sessionService, String username, String serverId, String ipAddress) {
         try {
             info("SessionService class: " + sessionService.getClass().getName());
             info("SessionService class loader: " + sessionService.getClass().getClassLoader());
 
+            // 打印所有方法，以便调试
             info("Available methods:");
             for (java.lang.reflect.Method method : sessionService.getClass().getMethods()) {
                 if (method.getName().equals("hasJoinedServer")) {
@@ -58,6 +87,8 @@ public class MojangAuthProvider extends BaseAuthProvider {
                 }
             }
 
+            // 尝试不同的方法签名
+            // 1. 尝试 (GameProfile, String, InetAddress) 签名
             try {
                 Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
                 java.lang.reflect.Method method = sessionService.getClass().getMethod("hasJoinedServer", gameProfileClass, String.class, java.net.InetAddress.class);
@@ -77,11 +108,13 @@ public class MojangAuthProvider extends BaseAuthProvider {
 
                 return method.invoke(sessionService, gameProfile, serverId, inetAddress);
             } catch (NoSuchMethodException e1) {
+                // 2. 尝试 (String, String, String) 签名
                 try {
                     java.lang.reflect.Method method = sessionService.getClass().getMethod("hasJoinedServer", String.class, String.class, String.class);
                     info("Using method signature: (String, String, String)");
                     return method.invoke(sessionService, username, serverId, ipAddress);
                 } catch (NoSuchMethodException e2) {
+                    // 3. 尝试 (String, String, java.net.InetAddress) 签名
                     try {
                         java.lang.reflect.Method method = sessionService.getClass().getMethod("hasJoinedServer", String.class, String.class, java.net.InetAddress.class);
                         info("Using method signature: (String, String, InetAddress)");
@@ -91,6 +124,7 @@ public class MojangAuthProvider extends BaseAuthProvider {
                         }
                         return method.invoke(sessionService, username, serverId, inetAddress);
                     } catch (NoSuchMethodException e3) {
+                        // 4. 尝试 (String, String) 签名
                         try {
                             java.lang.reflect.Method method = sessionService.getClass().getMethod("hasJoinedServer", String.class, String.class);
                             info("Using method signature: (String, String)");
